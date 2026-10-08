@@ -6,7 +6,7 @@ from collagen.loading import load_image
 from collagen.pipeline import analyze
 from collagen.segmentation import ThresholdSegmenter
 from collagen.export import csv_bytes, result_archive
-from collagen.validation import compare_ground_truth
+from collagen.validation import comparison_report
 
 st.set_page_config(page_title="Collagen Fiber Analyzer", layout="wide")
 st.title("Collagen Fiber Analyzer")
@@ -38,8 +38,14 @@ if upload:
         st.download_button("Download all QC outputs", result_archive(result), "analysis.zip", "application/zip")
         manual = st.file_uploader("Optional ImageJ ground-truth CSV (match IDs explicitly)", type="csv")
         if manual:
-            comparison = compare_ground_truth(result.table, pd.read_csv(manual))
-            st.dataframe(comparison)
-            st.download_button("Download comparison", csv_bytes(comparison), "comparison.csv", "text/csv")
+            report = comparison_report(result.table, pd.read_csv(manual))
+            st.subheader("ImageJ comparison")
+            st.json(report.counts)
+            st.caption("Errors use accepted matched fibers with both measurements present, separately for length and diameter. Bias = mean(automated − manual); MAE = mean absolute error, in µm. Empty statistics mean no usable pairs. Unmatched IDs describe comparison coverage, not detection accuracy.")
+            st.dataframe(report.metrics, hide_index=True)
+            st.dataframe(report.rows, hide_index=True)
+            st.download_button("Download comparison", csv_bytes(report.rows), "comparison.csv", "text/csv")
+            st.download_button("Download error statistics", csv_bytes(report.metrics), "comparison_statistics.csv", "text/csv")
+            st.download_button("Download match counts", csv_bytes(pd.DataFrame([report.counts])), "comparison_counts.csv", "text/csv")
     except (ValueError, TypeError) as error:
         st.error(str(error))

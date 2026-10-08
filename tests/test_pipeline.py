@@ -83,7 +83,7 @@ def test_tiff_stack_rejected():
 
 
 def test_ground_truth_matching_and_unmatched():
-    auto = pd.DataFrame({'image_id': ['x', 'x'], 'fiber_id': [1, 2], 'length_um': [12., 8.], 'mean_diameter_um': [3., 2.]})
+    auto = pd.DataFrame({'image_id': ['x', 'x'], 'fiber_id': [1, 2], 'length_um': [12., 8.], 'mean_diameter_um': [3., 2.], 'review_status': ['accepted', 'accepted']})
     manual = pd.DataFrame({'image_id': ['x', 'x'], 'fiber_id': [1, 3], 'length_um': [10., 9.], 'mean_diameter_um': [2., 2.]})
     joined = compare_ground_truth(auto, manual)
     assert joined.loc[joined.fiber_id == 1, 'length_um_error'].iloc[0] == 2
