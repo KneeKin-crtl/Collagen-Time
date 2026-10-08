@@ -45,7 +45,17 @@ A future U-Net adapter can implement `Segmenter.__call__`, receiving a full-reso
 
 ## Validation with ImageJ
 
-Measure centerlines using segmented/freehand line selections with calibrated ImageJ units; measure perpendicular widths at multiple interior positions. Create a CSV with `image_id,fiber_id,length_um,mean_diameter_um`. Match candidate IDs explicitly from the annotated image; do not rely on row order. Upload this CSV in the UI or call `collagen.validation.compare_ground_truth`. Results include signed absolute-unit and percentage errors plus unmatched IDs. Exclude ambiguous candidates from accuracy estimates using the analysis review status, and report sample counts, segmentation errors, length/diameter bias, dispersion, and agreement across representative images. This comparison mechanism is not itself evidence of scientific validation.
+Measure centerlines using segmented/freehand line selections with calibrated ImageJ units; measure perpendicular widths at multiple interior positions. Create a CSV with `image_id,fiber_id,length_um,mean_diameter_um`. Match candidate IDs explicitly from the annotated image; do not rely on row order. Use the uploaded filename as `image_id`, and leave unavailable measurements blank. Duplicate or missing IDs and nonpositive, infinite, or nonnumeric measurements are rejected.
+
+Upload this CSV in the UI or call `collagen.validation.comparison_report(analysis.table, manual_table)`. The automated table must include `review_status` (`accepted` or `review_required`); the manual table does not need this field. The report provides:
+
+- Counts of all matched IDs, unmatched automated IDs, unmatched manual IDs, and accepted versus review-required matches. Matching uses both image and fiber IDs. These counts describe comparison coverage; manual data may be a subset, so unmatched IDs do not automatically mean detection failures.
+- Per-candidate measurements and acceptance status, preserving every unmatched and excluded candidate. Signed errors (`automated − manual`, in µm) and relative errors are populated only for accepted matched fibers with both values available for that metric.
+- Separate length and diameter statistics: paired sample count, accepted matches missing either measurement, bias (mean signed error), and mean absolute error (MAE). A missing length does not exclude an otherwise usable diameter pair. With no usable pairs, bias and MAE are missing, not zero.
+
+Download the full comparison, error statistics, and match counts as three CSVs. `compare_ground_truth` remains the row-level API and applies the same accepted-only error rules. Neither API modifies its inputs.
+
+For real-image validation, also assess segmentation errors, dispersion, and agreement across representative images. Acceptance is an automated QC classification, not proof of correct segmentation. This comparison mechanism is not itself evidence of scientific validation.
 
 Synthetic tests separate geometry from thresholding, exercise straight/diagonal/curved fibers, diameter tolerances, ambiguous topology, border QC, formats, exports, and manual matching. Raster tolerances are explicit. Real-image validation remains future work.
 
