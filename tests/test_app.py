@@ -48,7 +48,7 @@ tifffile.imwrite(buffer, image)
 buffer.name = "sample.tiff"
 manual = BytesIO(b"image_id,fiber_id,length_um,mean_diameter_um\\nsample.tiff,1,30,7\\nsample.tiff,2,,8\\nsample.tiff,3,20,5\\n")
 def upload(label, **kwargs):
-    return buffer if label.startswith("Microscopy") else manual
+    return buffer if label.startswith("Microscopy") else manual if label.startswith("Optional") else None
 patcher = patch("streamlit.file_uploader", side_effect=upload)
 patcher.start()
 '''
@@ -67,3 +67,28 @@ patcher.start()
     assert comparison.loc[3, '_merge'] == 'right_only'
     assert comparison.loc[1, 'review_status'] == 'review_required'
     assert comparison.length_um_error.isna().all()
+
+
+def test_app_workbook_review_without_an_image():
+    prefix = '''
+from unittest.mock import patch
+from io import BytesIO
+from openpyxl import Workbook
+book = Workbook()
+sheet = book.active
+sheet.title = "RT30min Length"
+sheet.append(["Image 1", "Length"])
+sheet.append([1, 12.])
+sheet.append([None, 12.])
+buffer = BytesIO()
+book.save(buffer)
+def upload(label, **kwargs):
+    return buffer if label == "Bowlin measurement workbook" else None
+patcher = patch("streamlit.file_uploader", side_effect=upload)
+patcher.start()
+'''
+    app = AppTest.from_string(prefix + (Path(__file__).resolve().parents[1] / 'app.py').read_text() + '\npatcher.stop()').run(timeout=30)
+    assert not app.exception
+    assert not app.error
+    assert app.dataframe[0].value.iloc[0].measurement_count == 1
+    assert len(app.dataframe[1].value) == 1

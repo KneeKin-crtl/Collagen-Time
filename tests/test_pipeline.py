@@ -90,3 +90,30 @@ def test_ground_truth_matching_and_unmatched():
     assert set(joined['_merge'].astype(str)) == {'both', 'left_only', 'right_only'}
     with pytest.raises(ValueError, match='unique'):
         compare_ground_truth(auto, pd.concat([manual, manual]))
+
+
+def test_local_component_measurement_preserves_global_geometry(monkeypatch):
+    import collagen.pipeline as pipeline
+    from collagen.geometry import measure
+    image = np.zeros((240, 400), np.uint8)
+    image[30:41, 80:200] = 200
+    image[120:129, :100] = 200  # A true image-border object.
+    shapes = []
+
+    def capture(mask, *args):
+        shapes.append(mask.shape)
+        return measure(mask, *args)
+
+    monkeypatch.setattr(pipeline, 'measure', capture)
+    result = pipeline.analyze(image, .3)
+    assert result.mask.shape == image.shape
+    assert result.annotated.shape == image.shape + (3,)
+    assert all(h < image.shape[0] and w < image.shape[1] for h, w in shapes)
+    for row in result.table.itertuples():
+        reference = measure(result.labels == row.fiber_id, .3)
+        assert row.length_um == pytest.approx(reference['length_um'])
+        assert row.mean_diameter_um == pytest.approx(reference['mean_diameter_um'])
+        assert row.diameter_sd_um == pytest.approx(reference['diameter_sd_um'])
+        assert json.loads(row.endpoints) == [[int(x), int(y)] for y, x in reference['endpoints']]
+    assert result.table.border_touch.tolist() == [False, True]
+    assert result.table.review_status.tolist() == ['accepted', 'review_required']
