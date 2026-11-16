@@ -60,3 +60,47 @@ For real-image validation, also assess segmentation errors, dispersion, and agre
 Synthetic tests separate geometry from thresholding, exercise straight/diagonal/curved fibers, diameter tolerances, ambiguous topology, border QC, formats, exports, and manual matching. Raster tolerances are explicit. Real-image validation remains future work.
 
 The lock file captures the tested Python 3.12 environment. `pyproject.toml` declares supported dependency ranges; other Python/platform combinations may need a separately validated lock.
+
+## Windows desktop build
+
+The desktop launcher opens the local application in your default browser and
+stops its server when you close the launcher. The intended Windows 10/11 x64
+bundle includes Python and dependencies and requires no network for analysis.
+It contains the conventional baseline, not a trained AI model.
+
+In GitHub, open **Actions > Build Windows desktop**, choose the run for the desired
+branch, and download **CollagenFiberAnalyzer-Windows-x64** from its artifacts after
+all checks succeed. Extract the whole ZIP and double-click
+`CollagenFiberAnalyzer.exe`; retain its `_internal` folder. An artifact is uploaded
+only after tests and a packaged analysis/server smoke check pass. Builds require a
+Windows runner; a Linux build is not a Windows executable. The launcher/browser
+interaction still needs a check on the target Windows workstation.
+
+For a developer build on Windows, from the repository root:
+
+```powershell
+python -m pip install -r requirements.lock.txt -r packaging/windows/build-requirements.txt -e ".[dev]"
+python -m pytest -q
+python desktop.py --smoke-test
+python -m PyInstaller --noconfirm packaging/windows/analyzer.spec
+```
+
+For a source launch: `python desktop.py`. For cloud/headless use, retain the
+Streamlit launch command above; the desktop control window requires a graphical
+session and Tk. Temporary startup logs live in `CollagenFiberAnalyzer` under the
+Windows temporary directory. The Windows bundle is currently unsigned.
+
+## Bowlin Excel workbook review
+
+The app can import the condition worksheets in the supplied workbook layout,
+independently of an image upload. It extracts only rows with numbered per-image
+ROIs and ignores pooled copies. Length and diameter are kept as separate records,
+with worksheet/cell provenance. Values retain original workbook units; units,
+diameter sampling and image/fiber correspondence must be confirmed before paired
+scientific comparison. Download normalized manual measurements and an image
+mapping template from **Review ImageJ Excel workbook**.
+
+See [dataset preparation and validation](docs/dataset-and-validation.md) for
+calibration, ROI exports, ambiguous objects and future AI requirements. User
+images, measurements and model weights are not included in the repository or
+Windows build.

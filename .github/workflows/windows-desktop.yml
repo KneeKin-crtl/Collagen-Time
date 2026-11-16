@@ -1,0 +1,53 @@
+name: Build Windows desktop
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - 'desktop.py'
+      - 'app.py'
+      - 'collagen/**'
+      - 'tests/**'
+      - 'packaging/windows/**'
+      - 'pyproject.toml'
+      - 'requirements.lock.txt'
+      - '.github/workflows/windows-desktop.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          architecture: 'x64'
+      - name: Install locked dependencies and build tools
+        run: python -m pip install -r requirements.lock.txt -r packaging/windows/build-requirements.txt -e ".[dev]"
+      - name: Check dependencies
+        run: python -m pip check
+      - name: Run tests
+        run: python -m pytest -q
+      - name: Check source launcher
+        run: python desktop.py --smoke-test
+      - name: Package Windows executable
+        run: python -m PyInstaller --noconfirm packaging/windows/analyzer.spec
+      - name: Check packaged analyzer
+        shell: pwsh
+        run: |
+          $result = Start-Process -FilePath 'dist/CollagenFiberAnalyzer/CollagenFiberAnalyzer.exe' -ArgumentList '--smoke-test' -Wait -PassThru
+          if ($result.ExitCode -ne 0) {
+            Get-Content "$env:TEMP/collagen-runtime-*.log" -ErrorAction SilentlyContinue
+            Get-Content "$env:TEMP/CollagenFiberAnalyzer/*.log" -ErrorAction SilentlyContinue
+            throw "Packaged smoke test failed ($($result.ExitCode))"
+          }
+      - name: Include user instructions
+        run: Copy-Item packaging/windows/READ-ME.txt dist/CollagenFiberAnalyzer/READ-ME.txt
+      - uses: actions/upload-artifact@v4
+        with:
+          name: CollagenFiberAnalyzer-Windows-x64
+          path: dist/CollagenFiberAnalyzer/
+          if-no-files-found: error

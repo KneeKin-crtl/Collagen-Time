@@ -7,10 +7,12 @@ from collagen.pipeline import analyze
 from collagen.segmentation import ThresholdSegmenter
 from collagen.export import csv_bytes, result_archive
 from collagen.validation import comparison_report
+from collagen.workbook import import_workbook, workbook_summary, image_manifest
 
 st.set_page_config(page_title="Collagen Fiber Analyzer", layout="wide")
 st.title("Collagen Fiber Analyzer")
 st.caption("Non-AI research baseline. Distance-transform width approximates perpendicular edge-to-edge width. Scientific accuracy has not been validated on real microscopy images.")
+st.caption("Use original images for analysis. For dark fibers on a gray background, uncheck ‘Bright fibers on dark background’. Review and exclude bunched or unclear fibers from accepted results.")
 upload = st.file_uploader("Microscopy image (single plane)", type=["tif", "tiff", "png", "jpg", "jpeg"])
 with st.sidebar:
     calibration = st.number_input("Calibration (µm/pixel)", min_value=0.000001, value=1.0, format="%.6f")
@@ -49,3 +51,17 @@ if upload:
             st.download_button("Download match counts", csv_bytes(pd.DataFrame([report.counts])), "comparison_counts.csv", "text/csv")
     except (ValueError, TypeError) as error:
         st.error(str(error))
+
+with st.expander("Review ImageJ Excel workbook"):
+    workbook = st.file_uploader("Bowlin measurement workbook", type="xlsx")
+    if workbook:
+        try:
+            records = import_workbook(workbook.getvalue())
+            st.caption("Numbered per-image measurements only; pooled copies are excluded. Values retain workbook units. Length and diameter remain separate until their fiber correspondence and measurement method are confirmed.")
+            st.dataframe(workbook_summary(records), hide_index=True)
+            st.dataframe(records, hide_index=True)
+            st.download_button("Download normalized manual measurements", csv_bytes(records), "manual_measurements.csv", "text/csv")
+            st.download_button("Download image mapping template", csv_bytes(image_manifest(records)), "image_mapping.csv", "text/csv")
+            st.info("Fill the mapping template with original filenames and verified calibration. Numbered reference JPGs do not contain the original ROI coordinates. Do not match manual ROI numbers to automated fiber IDs without checking correspondence.")
+        except ValueError as error:
+            st.error(str(error))

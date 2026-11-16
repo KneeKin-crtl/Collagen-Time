@@ -1,0 +1,26 @@
+Collagen Fiber Analyzer - Windows 10/11 x64
+
+1. Extract the entire downloaded ZIP into a writable folder.
+2. Double-click CollagenFiberAnalyzer.exe. Keep the _internal folder beside it.
+3. A small launcher opens the analyzer in your default browser.
+4. Select an ORIGINAL image, not a labeled/numbered copy.
+5. Enter the verified micrometers-per-pixel calibration for that exact image.
+6. For dark fibers on a gray background, uncheck Bright fibers on dark background.
+7. Review the mask and accepted/review-required candidates before exporting.
+8. Close the launcher window to stop the local analyzer.
+
+The packaged application runs locally and needs no Python installation or
+Internet connection for analysis. Downloading the ZIP requires Internet access.
+The baseline runs on the CPU; no GPU/CUDA installation is needed.
+
+This is the conventional baseline. It does not contain a trained AI model.
+Distance-transform diameter is approximate. Accuracy on real microscopy data
+has not yet been established. Only clear, separated fibers should be accepted;
+review excluded candidates and inspect accepted ones for missed merges.
+
+Workbook review imports the numbered per-image records from the supported
+Bowlin layout, retaining length and diameter separately. Pooled copies are
+excluded. Confirm units and original image/ROI correspondence before comparison.
+Numbered JPGs are reference illustrations, not segmentation training masks.
+
+Startup logs: the CollagenFiberAnalyzer folder in your Windows temporary folder.

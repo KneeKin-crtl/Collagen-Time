@@ -33,17 +33,20 @@ def analyze(image, calibration, image_id="image", segmenter=None, sigma=0.0, min
     labels, regions = detect(mask)
     rows, objects = [], []
     for region in regions:
-        component = labels == region.label
+        # Work in each bounding box, preserving full-resolution pixel geometry.
+        # Full-image masks per candidate are prohibitive for 17-megapixel inputs.
+        component = region.image
+        y0, x0, y1, x1 = region.bbox
         m = measure(component, calibration, exclusion_px)
-        border = bool(component[0].any() or component[-1].any() or component[:, 0].any() or component[:, -1].any())
+        border = y0 == 0 or x0 == 0 or y1 == mask.shape[0] or x1 == mask.shape[1]
         flags, status = classify(m, border, region.area, min_area)
         rows.append(dict(image_id=image_id, fiber_id=region.label, calibration_um_per_px=calibration,
                          area_px=int(region.area), length_um=m["length_um"], mean_diameter_um=m["mean_diameter_um"],
                          diameter_sd_um=m["diameter_sd_um"], diameter_samples=m["diameter_samples"],
-                         endpoints=json.dumps([[int(x), int(y)] for y, x in m["endpoints"]]),
+                         endpoints=json.dumps([[int(x + x0), int(y + y0)] for y, x in m["endpoints"]]),
                          border_touch=border, crossing_merge=bool(m["junctions"]), review_status=status,
                          qc_flags=";".join(flags), diameter_method="2x_distance_transform_approximation"))
-        objects.append((region.label, m["skeleton"], region.centroid, status == "accepted"))
+        objects.append((region.label, m["skeleton"], region.centroid, status == "accepted", (y0, x0)))
     table = pd.DataFrame(rows, columns=COLUMNS)
     accepted = table[table.review_status == "accepted"]
     summary = {"candidate_count": len(table), "accepted_isolated_count": len(accepted),
