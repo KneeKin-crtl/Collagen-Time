@@ -6,7 +6,7 @@ from .preprocessing import preprocess
 from .segmentation import ThresholdSegmenter
 from .detection import detect
 from .geometry import measure
-from .quality import classify
+from .quality import classify, counted_candidates
 from .visualization import annotate
 from .exclusions import overlap_pixels, validate_regions
 
@@ -90,7 +90,7 @@ def calibrate_analysis(pixels, calibration):
         table[name + '_um'] = table.pop(name + '_px') * calibration
     table['calibration_um_per_px'] = float(calibration)
     table = table[COLUMNS]
-    accepted = table[table.review_status == 'accepted']
+    accepted = table[counted_candidates(table)]
     summary = {'candidate_count': len(table), 'accepted_isolated_count': len(accepted),
                'review_required_count': len(table) - len(accepted),
                'excluded_region_count': int(table.excluded_region.sum()),

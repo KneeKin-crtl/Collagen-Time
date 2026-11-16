@@ -9,9 +9,12 @@ Collagen Fiber Analyzer - Windows 10/11 x64
 6. Review the proposed scale-bar/text preview. Choose Exclude rectangle (adjust
    coordinates as needed), or explicitly confirm no exclusion is needed.
    Dark fibers on a light background is now the default polarity.
-7. Press Analyze image. Review the mask and candidates. Excluded candidates remain
-   flagged in the CSV and are omitted from accepted statistics. Use Prepare QC
-   archive to generate the complete ZIP only when you want to download it.
+7. Press Analyze image. The primary image overlays green counted fibers and red
+   excluded candidates using the actual counting decisions. Open View Detailed
+   Fiber Analysis to inspect the original, mask, labels, and detailed centerlines.
+   Excluded candidates remain flagged in the CSV and are omitted from accepted
+   statistics. Use Prepare QC archive to generate the complete ZIP when needed;
+   it also contains the primary count_overlay.tiff.
 8. Close the launcher window to stop the local analyzer.
 
 The executable includes the green/red collagen icon. For a desktop shortcut,

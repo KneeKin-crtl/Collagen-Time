@@ -157,6 +157,13 @@ patcher.start()
         raise RuntimeError(f'Bundled upload UI failed: {app.exception} {app.error}')
     if app.dataframe[0].value.review_status.tolist() != ['accepted']:
         raise RuntimeError('Bundled UI measurement failed.')
+    if len(app.main.get('image')) != 1:
+        raise RuntimeError('Bundled UI must default to one primary counting overlay.')
+    app.session_state['fiber_details'] = True
+    app.run(timeout=60)
+    details = next(e for e in app.expander if e.label == 'View Detailed Fiber Analysis')
+    if len(details.get('image')) != 4 or len(app.main.get('image')) != 5:
+        raise RuntimeError('Bundled detailed analysis must retain all four stages.')
     if sys.platform == 'win32':
         import tkinter as tk
         set_desktop_identity()
