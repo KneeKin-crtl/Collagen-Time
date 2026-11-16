@@ -62,3 +62,27 @@ Selected manual fibers are not an exhaustive count reference: unmatched automate
 IDs do not automatically mean false positives. Test specimen variability,
 segmentation boundaries, missed fibers, merges and repeat manual measurements.
 No real-image accuracy result or trained-model claim has been established yet.
+
+## Acceptance checklist before trusting measurements
+
+1. Record the verified calibration for each original image, with its physical
+   units. The app requires explicit entry and a decision on any proposed
+   scale-bar/text exclusion. Verify masks and exclusion overlays at full detail.
+2. Match individual automated IDs to ImageJ ROIs using the original coordinates.
+   A shared row number or the same count of selected objects is not a match.
+3. Confirm whether manual diameter values are single perpendicular widths or
+   per-fiber means over several positions. Compare equivalent quantities. Agree
+   on endpoints and whether optical halos belong to the measured boundary.
+4. Set acceptable length/diameter errors with the scientific team before judging
+   results. Use images or independent specimens not used to tune settings, and
+   retain all originals/labels/patches of one image in a single evaluation group.
+5. Report paired sample counts, bias, MAE, missing/excluded coverage and failure
+   examples. Evaluate boundary quality and merges/splits alongside measurements.
+   Fifty sampled fibers are not assumed to be a complete image count. Repeated
+   fibers from one image are correlated; do not claim 750 independent specimens.
+6. Repeat manual measurements on a subset to establish observer variability.
+   If agreement is inadequate, refine on the development images and repeat the
+   held-out evaluation before scientific use.
+
+Passing software tests and exclusion checks on the supplied images does not
+replace this paired validation. No numerical accuracy tolerance is claimed yet.

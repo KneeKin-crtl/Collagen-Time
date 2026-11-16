@@ -1,4 +1,4 @@
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass, field
 import json
 import numpy as np
 import pandas as pd
@@ -8,8 +8,12 @@ from .detection import detect
 from .geometry import measure
 from .quality import classify
 from .visualization import annotate
+from .exclusions import overlap_pixels, validate_regions
 
-COLUMNS = ["image_id", "fiber_id", "calibration_um_per_px", "area_px", "length_um", "mean_diameter_um", "diameter_sd_um", "diameter_samples", "endpoints", "border_touch", "crossing_merge", "review_status", "qc_flags", "diameter_method"]
+COLUMNS = ["image_id", "fiber_id", "calibration_um_per_px", "area_px", "length_um", "mean_diameter_um", "diameter_sd_um", "diameter_samples", "endpoints", "border_touch", "crossing_merge", "review_status", "qc_flags", "diameter_method", "excluded_region", "exclusion_overlap_px"]
+DISTANCE_FIELDS = ['length', 'mean_diameter', 'diameter_sd']
+PIXEL_COLUMNS = [c.replace('_um', '_px') for c in COLUMNS if c != 'calibration_um_per_px']
+
 
 @dataclass
 class Analysis:
@@ -19,38 +23,86 @@ class Analysis:
     annotated: np.ndarray
     table: pd.DataFrame
     summary: dict
+    parameters: dict = field(default_factory=dict)
 
 
-def analyze(image, calibration, image_id="image", segmenter=None, sigma=0.0, min_area=20, exclusion_px=2.0):
-    if not np.isfinite(calibration) or calibration <= 0:
-        raise ValueError("Calibration must be finite and positive.")
+@dataclass
+class PixelAnalysis:
+    """Calibration-independent measurements, suitable for a bounded UI cache."""
+    original: np.ndarray
+    mask: np.ndarray
+    labels: np.ndarray
+    annotated: np.ndarray
+    table: pd.DataFrame
+    parameters: dict
+
+
+def analyze_pixels(image, image_id="image", segmenter=None, sigma=0.0, min_area=20,
+                   exclusion_px=2.0, exclusion_regions=()):
     if min_area < 1:
         raise ValueError("Minimum area must be positive.")
+    if not np.isfinite(exclusion_px) or exclusion_px < 0:
+        raise ValueError('Endpoint exclusion must be finite and nonnegative.')
+    regions_to_exclude = validate_regions(exclusion_regions, image.shape)
+    segmenter = segmenter or ThresholdSegmenter()
     gray = preprocess(image, sigma)
-    mask = np.asarray((segmenter or ThresholdSegmenter())(gray))
+    mask = np.asarray(segmenter(gray))
     if mask.shape != gray.shape or mask.dtype != bool:
         raise ValueError("Segmenter must return a boolean mask at original resolution.")
     labels, regions = detect(mask)
     rows, objects = [], []
     for region in regions:
-        # Work in each bounding box, preserving full-resolution pixel geometry.
-        # Full-image masks per candidate are prohibitive for 17-megapixel inputs.
         component = region.image
         y0, x0, y1, x1 = region.bbox
-        m = measure(component, calibration, exclusion_px)
+        m = measure(component, 1.0, exclusion_px)
         border = y0 == 0 or x0 == 0 or y1 == mask.shape[0] or x1 == mask.shape[1]
         flags, status = classify(m, border, region.area, min_area)
-        rows.append(dict(image_id=image_id, fiber_id=region.label, calibration_um_per_px=calibration,
-                         area_px=int(region.area), length_um=m["length_um"], mean_diameter_um=m["mean_diameter_um"],
-                         diameter_sd_um=m["diameter_sd_um"], diameter_samples=m["diameter_samples"],
-                         endpoints=json.dumps([[int(x + x0), int(y + y0)] for y, x in m["endpoints"]]),
-                         border_touch=border, crossing_merge=bool(m["junctions"]), review_status=status,
-                         qc_flags=";".join(flags), diameter_method="2x_distance_transform_approximation"))
-        objects.append((region.label, m["skeleton"], region.centroid, status == "accepted", (y0, x0)))
-    table = pd.DataFrame(rows, columns=COLUMNS)
-    accepted = table[table.review_status == "accepted"]
-    summary = {"candidate_count": len(table), "accepted_isolated_count": len(accepted),
-               "review_required_count": len(table) - len(accepted),
-               "accepted_mean_length_um": float(accepted.length_um.mean()),
-               "accepted_mean_diameter_um": float(accepted.mean_diameter_um.mean())}
-    return Analysis(image, mask, labels, annotate(image, objects), table, summary)
+        overlap = overlap_pixels(component, region.bbox, regions_to_exclude) if regions_to_exclude else 0
+        if overlap:
+            # Preserve the entire candidate; cutting it would fabricate endpoints.
+            flags.append('excluded_region')
+            status = 'review_required'
+        rows.append(dict(image_id=image_id, fiber_id=region.label,
+                         area_px=int(region.area), length_px=m['length_um'],
+                         mean_diameter_px=m['mean_diameter_um'], diameter_sd_px=m['diameter_sd_um'],
+                         diameter_samples=m['diameter_samples'],
+                         endpoints=json.dumps([[int(x + x0), int(y + y0)] for y, x in m['endpoints']]),
+                         border_touch=border, crossing_merge=bool(m['junctions']), review_status=status,
+                         qc_flags=';'.join(flags), diameter_method='2x_distance_transform_approximation',
+                         excluded_region=bool(overlap), exclusion_overlap_px=overlap))
+        objects.append((region.label, m['skeleton'], region.centroid, status == 'accepted', (y0, x0)))
+    parameters = {
+        'segmentation': asdict(segmenter) if isinstance(segmenter, ThresholdSegmenter) else {'type': type(segmenter).__name__},
+        'sigma_px': float(sigma), 'min_area_px': int(min_area), 'endpoint_exclusion_px': float(exclusion_px),
+        'exclusion_regions_xyxy': [list(r) for r in regions_to_exclude],
+        'exclusion_policy': 'intersecting candidates retained and flagged; excluded from accepted statistics',
+    }
+    return PixelAnalysis(image, mask, labels, annotate(image, objects, regions_to_exclude),
+                         pd.DataFrame(rows, columns=PIXEL_COLUMNS), parameters)
+
+
+def calibrate_analysis(pixels, calibration):
+    """Convert distances only; do not rerun segmentation or alter pixel geometry."""
+    if calibration is None or not np.isfinite(calibration) or calibration <= 0:
+        raise ValueError('Enter a verified, finite, positive calibration in µm/pixel.')
+    table = pixels.table.copy()
+    for name in DISTANCE_FIELDS:
+        table[name + '_um'] = table.pop(name + '_px') * calibration
+    table['calibration_um_per_px'] = float(calibration)
+    table = table[COLUMNS]
+    accepted = table[table.review_status == 'accepted']
+    summary = {'candidate_count': len(table), 'accepted_isolated_count': len(accepted),
+               'review_required_count': len(table) - len(accepted),
+               'excluded_region_count': int(table.excluded_region.sum()),
+               'accepted_mean_length_um': float(accepted.length_um.mean()),
+               'accepted_mean_diameter_um': float(accepted.mean_diameter_um.mean())}
+    parameters = {**pixels.parameters, 'calibration_um_per_px': float(calibration)}
+    return Analysis(pixels.original, pixels.mask, pixels.labels, pixels.annotated, table, summary, parameters)
+
+
+def analyze(image, calibration, image_id="image", segmenter=None, sigma=0.0, min_area=20,
+            exclusion_px=2.0, exclusion_regions=()):
+    if calibration is None or not np.isfinite(calibration) or calibration <= 0:
+        raise ValueError('Enter a verified, finite, positive calibration in µm/pixel.')
+    return calibrate_analysis(analyze_pixels(image, image_id, segmenter, sigma, min_area,
+                                           exclusion_px, exclusion_regions), calibration)

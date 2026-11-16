@@ -5,8 +5,13 @@ Collagen Fiber Analyzer - Windows 10/11 x64
 3. A small launcher opens the analyzer in your default browser.
 4. Select an ORIGINAL image, not a labeled/numbered copy.
 5. Enter the verified micrometers-per-pixel calibration for that exact image.
-6. For dark fibers on a gray background, uncheck Bright fibers on dark background.
-7. Review the mask and accepted/review-required candidates before exporting.
+   Calibration is required and starts blank for each image.
+6. Review the proposed scale-bar/text preview. Choose Exclude rectangle (adjust
+   coordinates as needed), or explicitly confirm no exclusion is needed.
+   Dark fibers on a light background is now the default polarity.
+7. Press Analyze image. Review the mask and candidates. Excluded candidates remain
+   flagged in the CSV and are omitted from accepted statistics. Use Prepare QC
+   archive to generate the complete ZIP only when you want to download it.
 8. Close the launcher window to stop the local analyzer.
 
 The packaged application runs locally and needs no Python installation or

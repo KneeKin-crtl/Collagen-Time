@@ -31,7 +31,7 @@ def test_segmentation_and_qc_export():
     assert result.table.crossing_merge.sum() == 1
     assert 'below_min_area' in ';'.join(result.table.qc_flags)
     with zipfile.ZipFile(BytesIO(result_archive(result))) as archive:
-        assert len(archive.namelist()) == 6
+        assert len(archive.namelist()) == 7
         assert np.array_equal(tifffile.imread(BytesIO(archive.read('original.tiff'))), image)
         labels = tifffile.imread(BytesIO(archive.read('labels.tiff')))
         assert np.array_equal(labels, result.labels)

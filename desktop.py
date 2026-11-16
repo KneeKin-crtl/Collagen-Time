@@ -124,6 +124,11 @@ patcher = patch("streamlit.file_uploader", side_effect=uploaded)
 patcher.start()
 '''
     app = AppTest.from_string(prefix + app_path().read_text(encoding='utf-8') + '\npatcher.stop()').run(timeout=60)
+    if app.dataframe:
+        raise RuntimeError('Analysis ran without calibration/submission.')
+    next(w for w in app.number_input if w.label == 'Calibration (µm/pixel)').set_value(.5)
+    next(w for w in app.checkbox if w.label == 'Bright fibers on dark background').check()
+    next(w for w in app.button if w.label == 'Analyze image').click().run(timeout=60)
     if app.exception or app.error or len(app.dataframe) != 1:
         raise RuntimeError(f'Bundled upload UI failed: {app.exception} {app.error}')
     if app.dataframe[0].value.review_status.tolist() != ['accepted']:

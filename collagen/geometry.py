@@ -40,15 +40,17 @@ def measure(mask, calibration, exclusion_px=2.0):
                 todo.extend(graph[p])
     isolated = len(endpoints) == 2 and not junctions and len(seen) == len(graph)
     length = sum(sum(edges.values()) for edges in graph.values()) / 2 * calibration if isolated else np.nan
-    # Pad so the outside of the image is background, including border objects.
-    distance = distance_transform_edt(np.pad(mask, 1))[1:-1, 1:-1]
-    reliable = skeleton.copy()
-    for y, x in endpoints + junctions:
-        # Exclude at least one local radius to avoid cap/junction width bias.
-        radius = max(exclusion_px, distance[y, x])
+    diameters = np.array([])
+    if isolated:
+        # Ambiguous objects have no reported width. Avoid scanning their full
+        # bounding box once per junction when that work cannot yield a result.
+        distance = distance_transform_edt(np.pad(mask, 1))[1:-1, 1:-1]
+        reliable = skeleton.copy()
         yy, xx = np.ogrid[:mask.shape[0], :mask.shape[1]]
-        reliable &= (yy - y)**2 + (xx - x)**2 > radius**2
-    diameters = 2 * distance[reliable] * calibration if isolated else np.array([])
+        for y, x in endpoints:
+            radius = max(exclusion_px, distance[y, x])
+            reliable &= (yy - y)**2 + (xx - x)**2 > radius**2
+        diameters = 2 * distance[reliable] * calibration
     return {"skeleton": skeleton, "endpoints": endpoints, "junctions": junctions,
             "isolated": isolated, "length_um": length,
             "mean_diameter_um": float(diameters.mean()) if diameters.size else np.nan,
