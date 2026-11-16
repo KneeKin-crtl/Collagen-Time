@@ -16,6 +16,28 @@ python -m streamlit run app.py
 
 Enter the image's calibration in micrometers per pixel. Calibration must be isotropic; resample anisotropic acquisitions with appropriate calibration before analysis. No automatic inference from image metadata is performed. Uploaded pixels and exported originals retain their dimensions and bit depth. TIFF stacks are rejected rather than silently selecting a plane.
 
+Calibration starts blank for each original image. Enter the verified value, review
+the scale-bar/text region if proposed, and press **Analyze image**. The default
+polarity is dark fibers on a lighter background. Parameter edits take effect on
+submission; existing results always reflect the last submitted settings.
+
+The lower-right scale-bar proposal is a heuristic preview, not a calibration
+estimate. If a panel is proposed, explicitly choose **Exclude rectangle** (adjust
+its original-pixel coordinates if needed), or **No exclusion needed (reviewed)**.
+For other annotations, enter and confirm a custom rectangle. Every intersecting
+candidate remains in the mask, labeled output and CSV with `excluded_region`, its
+overlap pixel count and `review_required` status. Whole candidates are flagged;
+their centerlines are not cut into artificial fibers. Confirmed regions are
+outlined on the annotated image and excluded from accepted summary/error statistics.
+
+Pixel measurements are cached separately from calibration with a bounded
+two-entry cache. Calibration changes reuse geometry. Ambiguous centerlines skip
+width work that cannot produce a reportable measurement. The full QC archive is
+built only after **Prepare QC archive**, then downloaded using its download button.
+Archives include `analysis_parameters.json` with segmentation settings, exclusion
+rectangles, calibration and (in the UI) input hash and operator review choice.
+Empty/corrupt image inputs produce validation errors rather than decoder tracebacks.
+
 ## Workflow and interpretation
 
 Choose bright or dark fibers, Otsu/manual/local thresholding, optional Gaussian smoothing, and optional opening/closing radii in pixels. Defaults disable morphology to avoid introducing merges. Inspect the mask for missed fibers and merged objects before interpreting measurements. Intensity normalization is global min/max and color images are converted to luminance; stain-specific color separation is not included.
@@ -36,6 +58,7 @@ The UI shows original, binary mask, labeled mask, IDs and centerlines (green acc
 - `detection`: connected candidate labeling
 - `geometry`: skeleton graph, physical length, approximate width
 - `quality`: acceptance and exclusion flags
+- `exclusions`: validated original-pixel rectangles and scale-panel proposals
 - `visualization`: IDs and centerlines
 - `export`: CSV and complete QC archive
 - `validation`: explicit ground-truth matching

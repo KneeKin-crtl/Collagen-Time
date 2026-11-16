@@ -5,6 +5,8 @@ import tifffile
 
 
 def load_image(data: bytes, filename: str) -> np.ndarray:
+    if not data:
+        raise ValueError("The image file is empty. Choose a valid TIFF, PNG, or JPEG.")
     suffix = filename.rsplit(".", 1)[-1].lower()
     if suffix in {"tif", "tiff"}:
         with tifffile.TiffFile(BytesIO(data)) as tif:
@@ -12,7 +14,10 @@ def load_image(data: bytes, filename: str) -> np.ndarray:
                 raise ValueError("Upload a single-plane TIFF; stacks require explicit plane selection.")
             image = tif.pages[0].asarray()
     elif suffix in {"png", "jpg", "jpeg"}:
-        image = cv2.imdecode(np.frombuffer(data, np.uint8), cv2.IMREAD_UNCHANGED)
+        try:
+            image = cv2.imdecode(np.frombuffer(data, np.uint8), cv2.IMREAD_UNCHANGED)
+        except cv2.error as error:
+            raise ValueError("Image could not be decoded. Choose a valid PNG or JPEG.") from error
         if image is None:
             raise ValueError("Image could not be decoded.")
         if image.ndim == 3:

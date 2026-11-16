@@ -20,4 +20,5 @@ def result_archive(result):
         archive.writestr("fibers.csv", csv_bytes(result.table))
         summary = {k: (None if isinstance(v, float) and not np.isfinite(v) else v) for k, v in result.summary.items()}
         archive.writestr("summary.json", json.dumps(summary, indent=2, allow_nan=False))
+        archive.writestr("analysis_parameters.json", json.dumps(result.parameters, indent=2, allow_nan=False))
     return output.getvalue()
