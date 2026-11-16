@@ -13,10 +13,27 @@ import traceback
 import urllib.error
 import urllib.request
 import webbrowser
+from collagen.resources import asset_path, resource_root
 
 
 def app_path():
-    return Path(getattr(sys, '_MEIPASS', Path(__file__).resolve().parent)) / 'app.py'
+    return resource_root() / 'app.py'
+
+
+def set_desktop_identity():
+    if sys.platform == 'win32':
+        import ctypes
+        ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID('KneeKin.CollagenFiberAnalyzer')
+
+
+def set_window_icon(window):
+    if sys.platform == 'win32':
+        window.iconbitmap(default=str(asset_path('collagen.ico')))
+    else:
+        import tkinter as tk
+        icon = tk.PhotoImage(file=str(asset_path('collagen.png')))
+        window.iconphoto(True, icon)
+        window._collagen_icon = icon  # Keep the Tcl image alive.
 
 
 def free_port():
@@ -81,6 +98,13 @@ def serve(port):
 
 
 def self_test():
+    from PIL import Image
+    with Image.open(asset_path('collagen.ico')) as icon:
+        if icon.ico.sizes() != {(n, n) for n in (16, 24, 32, 48, 64, 128, 256)}:
+            raise RuntimeError('Bundled Windows icon is missing required sizes.')
+    with Image.open(asset_path('collagen.png')) as icon:
+        if icon.size != (256, 256):
+            raise RuntimeError('Bundled application PNG icon is invalid.')
     # These explicit imports also let PyInstaller discover the analysis modules.
     from io import BytesIO
     import numpy as np
@@ -135,8 +159,10 @@ patcher.start()
         raise RuntimeError('Bundled UI measurement failed.')
     if sys.platform == 'win32':
         import tkinter as tk
+        set_desktop_identity()
         window = tk.Tk()
         window.withdraw()
+        set_window_icon(window)
         window.update()
         window.destroy()
 
@@ -155,7 +181,9 @@ def smoke_test():
 def launch():
     import tkinter as tk
     from tkinter import messagebox
+    set_desktop_identity()
     root = tk.Tk()
+    set_window_icon(root)
     root.title('Collagen Fiber Analyzer')
     root.geometry('540x220')
     status = tk.StringVar(value='Starting the local analyzer…')

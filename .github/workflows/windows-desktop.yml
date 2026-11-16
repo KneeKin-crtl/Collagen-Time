@@ -5,6 +5,8 @@ on:
   push:
     paths:
       - 'desktop.py'
+      - 'assets/**'
+      - 'tools/build_icon.py'
       - 'app.py'
       - 'collagen/**'
       - 'tests/**'

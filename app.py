@@ -10,6 +10,7 @@ from collagen.exclusions import suggest_scale_bar_region, validate_regions
 from collagen.export import csv_bytes, result_archive
 from collagen.validation import comparison_report
 from collagen.workbook import import_workbook, workbook_summary, image_manifest
+from collagen.resources import asset_path
 
 
 @st.cache_data(show_spinner=False, max_entries=2)
@@ -26,7 +27,7 @@ def cached_pixels(data, filename, settings):
                           settings['exclusion_regions'])
 
 
-st.set_page_config(page_title='Collagen Fiber Analyzer', layout='wide')
+st.set_page_config(page_title='Collagen Fiber Analyzer', page_icon=str(asset_path('collagen.png')), layout='wide')
 st.title('Collagen Fiber Analyzer')
 st.caption('Non-AI research baseline. Distance-transform width is approximate. Scientific accuracy on real microscopy images has not been established.')
 st.caption('Use originals. Review unclear/bunched candidates. Analysis runs only when you press Analyze image; results reflect the last submitted settings.')

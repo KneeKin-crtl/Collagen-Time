@@ -14,6 +14,10 @@ Collagen Fiber Analyzer - Windows 10/11 x64
    archive to generate the complete ZIP only when you want to download it.
 8. Close the launcher window to stop the local analyzer.
 
+The executable includes the green/red collagen icon. For a desktop shortcut,
+right-click CollagenFiberAnalyzer.exe > Show more options > Send to > Desktop
+(create shortcut). Keep the application folder in the same location afterward.
+
 The packaged application runs locally and needs no Python installation or
 Internet connection for analysis. Downloading the ZIP requires Internet access.
 The baseline runs on the CPU; no GPU/CUDA installation is needed.
