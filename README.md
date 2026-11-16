@@ -113,6 +113,23 @@ Streamlit launch command above; the desktop control window requires a graphical
 session and Tk. Temporary startup logs live in `CollagenFiberAnalyzer` under the
 Windows temporary directory. The Windows bundle is currently unsigned.
 
+### Application icon
+
+The executable, launcher window and browser tab use the collagen artwork in
+`assets/`. The original PNG is retained byte-for-byte as `collagen-original.png`.
+Runtime assets are a 256-pixel PNG and an ICO with 16, 24, 32, 48, 64, 128 and
+256-pixel frames. Regenerate them with:
+
+```bash
+python tools/build_icon.py artwork.png --output-dir assets
+```
+
+Build the Windows package afterward to embed the ICO. The packaged smoke test
+checks that the assets exist and Windows can load the window icon. To create a
+desktop shortcut, right-click the extracted executable, choose **Show more
+options > Send to > Desktop (create shortcut)**. The shortcut uses the embedded
+application icon.
+
 ## Bowlin Excel workbook review
 
 The app can import the condition worksheets in the supplied workbook layout,

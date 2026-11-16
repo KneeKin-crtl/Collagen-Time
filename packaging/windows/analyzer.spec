@@ -7,7 +7,9 @@ root = Path(SPECPATH).parent.parent
 analysis = Analysis(
     [str(root / 'desktop.py')],
     pathex=[str(root)],
-    datas=[(str(root / 'app.py'), '.')]
+    datas=[(str(root / 'app.py'), '.'),
+           (str(root / 'assets' / 'collagen.png'), 'assets'),
+           (str(root / 'assets' / 'collagen.ico'), 'assets')]
           + collect_data_files('streamlit') + copy_metadata('streamlit'),
     hiddenimports=collect_submodules('streamlit') + collect_submodules('collagen')
                   + collect_submodules('scipy._external'),
@@ -15,6 +17,7 @@ analysis = Analysis(
 )
 pyz = PYZ(analysis.pure)
 exe = EXE(pyz, analysis.scripts, [], exclude_binaries=True,
-          name='CollagenFiberAnalyzer', console=False)
+          name='CollagenFiberAnalyzer', console=False,
+          icon=str(root / 'assets' / 'collagen.ico'))
 collection = COLLECT(exe, analysis.binaries, analysis.datas,
                      name='CollagenFiberAnalyzer')
