@@ -4,7 +4,9 @@ A modular, non-AI research baseline for single-plane TIFF, PNG, and JPEG microsc
 
 ## Run locally
 
-Requires Python 3.11 or newer (tested with Python 3.12). From this repository:
+Use Python 3.12 for the stable locked setup. An isolated, experimental
+[Python 3.15.2 setup](docs/python315.md) uses a separate package list and CI
+workflow; it includes a prerelease scikit-image dependency. From this repository:
 
 ```bash
 python -m venv .venv

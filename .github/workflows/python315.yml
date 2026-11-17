@@ -1,0 +1,70 @@
+name: Experimental Python 3.15
+
+on:
+  workflow_dispatch:
+  push:
+    branches: ['python315-compatibility']
+  pull_request:
+    paths:
+      - 'requirements-python315.lock.txt'
+      - 'packaging/windows/build-requirements-python315.txt'
+      - '.github/workflows/python315.yml'
+      - 'app.py'
+      - 'desktop.py'
+      - 'collagen/**'
+      - 'tests/**'
+      - 'pyproject.toml'
+
+permissions:
+  contents: read
+
+jobs:
+  compatibility:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.15.2'
+          architecture: 'x64'
+      - name: Verify interpreter
+        run: python -c "import sys; assert sys.version_info[:3] == (3, 15, 2); print(sys.version)"
+      - name: Install experimental dependencies
+        run: python -m pip install --only-binary=:all: -r requirements-python315.lock.txt -r packaging/windows/build-requirements-python315.txt
+      - name: Install application
+        run: python -m pip install -e ".[dev]"
+      - name: Check dependencies
+        run: python -m pip check
+      - name: Run tests
+        run: python -m pytest -q
+      - name: Check source launcher
+        run: python desktop.py --smoke-test
+      - name: Package Windows executable
+        if: runner.os == 'Windows'
+        run: python -m PyInstaller --noconfirm packaging/windows/analyzer.spec
+      - name: Check packaged analyzer
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $result = Start-Process -FilePath 'dist/CollagenFiberAnalyzer/CollagenFiberAnalyzer.exe' -ArgumentList '--smoke-test' -Wait -PassThru
+          if ($result.ExitCode -ne 0) {
+            Get-Content "$env:TEMP/collagen-runtime-*.log" -ErrorAction SilentlyContinue
+            Get-Content "$env:TEMP/CollagenFiberAnalyzer/*.log" -ErrorAction SilentlyContinue
+            throw "Packaged smoke test failed ($($result.ExitCode))"
+          }
+      - name: Include user instructions
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          Copy-Item packaging/windows/READ-ME.txt dist/CollagenFiberAnalyzer/READ-ME.txt
+          Set-Content dist/CollagenFiberAnalyzer/EXPERIMENTAL-PYTHON315.txt 'Experimental Python 3.15.2 build. Includes scikit-image 0.27.0rc1. Passing software tests does not establish measurement accuracy. Keep the stable build available.'
+      - uses: actions/upload-artifact@v6
+        if: runner.os == 'Windows'
+        with:
+          name: CollagenFiberAnalyzer-Windows-x64-experimental-python315
+          path: dist/CollagenFiberAnalyzer/
+          if-no-files-found: error
