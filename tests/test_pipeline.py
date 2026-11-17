@@ -49,6 +49,26 @@ def test_empty_and_dark_segmentation():
     assert result.summary['accepted_isolated_count'] == 1
 
 
+@pytest.mark.parametrize('method,opening,closing', [
+    ('manual', 0, 0), ('local', 0, 0), ('manual', 2, 0), ('manual', 0, 2),
+])
+def test_configured_threshold_and_morphology_preserve_isolated_fiber(method, opening, closing):
+    image = np.zeros((80, 120), np.uint8)
+    image[30:39, 15:100] = 200
+    if opening:
+        image[10, 10] = 200  # Opening must remove this detached speck.
+    if closing:
+        image[34, 50] = 0  # Closing must fill this interior hole.
+    result = analyze(image, .5, segmenter=ThresholdSegmenter(
+        method=method, opening_radius=opening, closing_radius=closing))
+    assert result.summary['candidate_count'] == 1
+    assert result.summary['accepted_isolated_count'] == 1
+    assert result.mask[34, 50]
+    assert not result.mask[10, 10]
+    assert result.mask.shape == image.shape
+    assert np.array_equal(result.original, image)
+
+
 def test_custom_segmenter_and_loop_review():
     mask = np.zeros((80, 80), bool)
     from skimage.draw import disk
