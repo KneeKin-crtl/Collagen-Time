@@ -44,6 +44,11 @@ def count_overlay(image, labels, table, opacity=.6):
         raise ValueError('Candidate labels must be nonnegative integers at original resolution.')
     if not {'fiber_id', 'review_status'} <= set(table.columns):
         raise ValueError('The API fiber IDs and review statuses are required for the overlay.')
+    if 'visible_in_overlay' in table:
+        hidden = ~table.visible_in_overlay.astype(bool)
+        if table.loc[hidden, 'review_status'].eq('accepted').any():
+            raise ValueError('Accepted objects cannot be hidden in the review overlay.')
+        table = table.loc[~hidden]
     if (table.fiber_id.isna().any() or table.fiber_id.duplicated().any()
             or not table.review_status.isin(['accepted', 'review_required']).all()):
         raise ValueError('Each candidate needs one unique ID and a valid API counting decision.')

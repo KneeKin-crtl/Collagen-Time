@@ -1,6 +1,6 @@
 # Collagen Fiber Analyzer
 
-A modular, non-AI research baseline for single-plane TIFF, PNG, and JPEG microscopy images. Scientific accuracy is **not established** until validated against representative real images and independently measured ground truth.
+A modular research application for single-plane TIFF, PNG, and JPEG microscopy images, with conventional segmentation, persistent manual corrections, and optional experimental feedback-trained object classification. Scientific accuracy is **not established** until validated against representative real images and independently measured ground truth.
 
 ## Run locally
 
@@ -50,12 +50,13 @@ Skeleton edges use weights 1 for horizontal/vertical movement and sqrt(2) for di
 
 Width is **twice the Euclidean distance to background at centerline pixels**, an approximation to manual perpendicular edge-to-edge diameter. Endpoint/junction neighborhoods are excluded using the larger of the configured radius and local distance-transform radius. Mean and population SD describe retained width samples, not uncertainty or between-fiber variability. Digital boundaries, skeleton bias, focus, stain, threshold choice, and curvature affect estimates. Length is between skeleton endpoints and does not include inferred end-cap extensions. Digital arc lengths have orientation-dependent bias.
 
-The primary view is one full-resolution overlay on the original: **green** marks
-candidates included in the final count and **red** marks identified candidates
-excluded from it. Color follows each candidate's API `review_status`, using the
-same acceptance rule as summary statistics. Foreground in a segmentation mask
-alone does not mean counted, and unlabeled background is not painted red. The
-overlay is a transparent tint with no ID labels or rectangles to obscure the view.
+The primary view is an interactive, full-resolution overlay on the original:
+**green** marks accepted objects and **red** marks rejected candidates. Click an
+object to toggle it, zoom in for precision, and use Undo to reverse a correction.
+Colors follow the final API decision, including manual overrides. Background
+clicks do not snap to nearby objects. Green does not guarantee measurable geometry:
+accepted objects with unavailable or partial measurements are reported separately
+and excluded from measurement aggregates. See [manual review and learning](docs/feedback-learning.md).
 
 The four processing stages—original, binary mask, labeled candidates, and detailed
 IDs/centerlines—remain in the collapsed **View Detailed Fiber Analysis** section.
@@ -67,8 +68,9 @@ Download CSV or a QC ZIP with original, segmentation, labels, detailed annotatio
 and `count_overlay.tiff`, plus CSV, summary and analysis parameters. The saved
 count overlay uses the same per-ID decisions as the displayed primary view.
 Endpoints are JSON lists of `[x, y]` pixel coordinates. Missing measurements are
-empty CSV fields. QC flags and review status are automatic suggestions; no manual
-per-fiber review editor is implemented yet. A green counting decision does not
+empty CSV fields. The full CSV preserves original decisions, QC flags, manual/model
+provenance and measurement eligibility. A separate accepted-measurements CSV contains
+only measurable accepted fibers. A green counting decision does not
 establish biological correctness or measurement accuracy.
 
 ## Modules
@@ -84,8 +86,12 @@ establish biological correctness or measurement accuracy.
 - `export`: CSV and complete QC archive
 - `validation`: explicit ground-truth matching
 - `pipeline`: orchestration and accepted-only statistics
+- `feedback`: local SQLite masks, correction/Undo history, training membership and model registry
+- `review`: manual and model decisions over immutable baseline masks and geometry
+- `learning`: experimental object classifier and image-held-out promotion checks
+- `editor`, `review_ui`: offline clickable canvas and review/training controls
 
-A future U-Net adapter can implement `Segmenter.__call__`, receiving a full-resolution normalized image and returning a same-size boolean mask. Geometry, QC, and export remain independent. No model training is included.
+A future U-Net adapter can implement `Segmenter.__call__`, receiving a full-resolution normalized image and returning a same-size boolean mask. Geometry, QC, and export remain independent. Feedback learning currently trains an object classifier only; segmentation model training is not included.
 
 ## Validation with ImageJ
 
@@ -110,7 +116,8 @@ The lock file captures the tested Python 3.12 environment. `pyproject.toml` decl
 The desktop launcher opens the local application in your default browser and
 stops its server when you close the launcher. The intended Windows 10/11 x64
 bundle includes Python and dependencies and requires no network for analysis.
-It contains the conventional baseline, not a trained AI model.
+It starts with the conventional baseline. No pretrained model is bundled; a local
+object classifier can be trained from explicitly reviewed corrections.
 
 In GitHub, open **Actions > Build Windows desktop**, choose the run for the desired
 branch, and download **CollagenFiberAnalyzer-Windows-x64** from its artifacts after

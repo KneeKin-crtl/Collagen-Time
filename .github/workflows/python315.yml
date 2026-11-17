@@ -3,7 +3,7 @@ name: Experimental Python 3.15
 on:
   workflow_dispatch:
   push:
-    branches: ['python315-compatibility']
+    branches: ['python315-compatibility', 'interactive-fiber-feedback']
   pull_request:
     paths:
       - 'requirements-python315.lock.txt'
@@ -14,6 +14,8 @@ on:
       - 'collagen/**'
       - 'tests/**'
       - 'pyproject.toml'
+      - 'assets/**'
+      - 'tools/check_feedback_browser.py'
 
 permissions:
   contents: read
@@ -41,7 +43,10 @@ jobs:
       - name: Check dependencies
         run: python -m pip check
       - name: Run tests
-        run: python -m pytest -q
+        run: python -m pytest -q --junitxml=test-results.xml
+      - name: Record failed tests
+        if: failure()
+        run: python tools/ci_test_summary.py
       - name: Check source launcher
         run: python desktop.py --smoke-test
       - name: Package Windows executable
@@ -63,6 +68,12 @@ jobs:
         run: |
           Copy-Item packaging/windows/READ-ME.txt dist/CollagenFiberAnalyzer/READ-ME.txt
           Set-Content dist/CollagenFiberAnalyzer/EXPERIMENTAL-PYTHON315.txt 'Experimental Python 3.15.2 build. Includes scikit-image 0.27.0rc1. Passing software tests does not establish measurement accuracy. Keep the stable build available.'
+      - name: Install browser test driver
+        if: runner.os == 'Windows'
+        run: python -m pip install -e ".[browser]"
+      - name: Check packaged interactive corrections in Chrome
+        if: runner.os == 'Windows'
+        run: python tools/check_feedback_browser.py --executable dist/CollagenFiberAnalyzer/CollagenFiberAnalyzer.exe --output-dir feedback-browser-results
       - name: Record packaged startup diagnostics
         if: failure() && runner.os == 'Windows'
         shell: pwsh

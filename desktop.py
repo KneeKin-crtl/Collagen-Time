@@ -164,13 +164,29 @@ patcher.start()
         raise RuntimeError(f'Bundled upload UI failed: {app.exception} {app.error}')
     if app.dataframe[0].value.review_status.tolist() != ['accepted']:
         raise RuntimeError('Bundled UI measurement failed.')
-    if len(app.main.get('image')) != 1:
-        raise RuntimeError('Bundled UI must default to one primary counting overlay.')
+    if len(app.main.get('component_instance')) != 1:
+        raise RuntimeError('Bundled UI must provide one interactive primary counting overlay.')
+    editor = resource_root() / 'assets' / 'fiber_editor' / 'index.html'
+    if not editor.is_file() or 'streamlit:setComponentValue' not in editor.read_text(encoding='utf-8'):
+        raise RuntimeError('Bundled interactive review component is missing.')
+    next(w for w in app.button if w.label == 'Mark rejected').click().run(timeout=60)
+    if app.exception or app.dataframe[0].value.classification.tolist() != ['rejected']:
+        raise RuntimeError('Bundled correction UI failed.')
+    next(w for w in app.button if w.label == 'Undo last correction').click().run(timeout=60)
+    if app.exception or app.dataframe[0].value.classification.tolist() != ['accepted']:
+        raise RuntimeError('Bundled correction Undo failed.')
     app.session_state['fiber_details'] = True
     app.run(timeout=60)
     details = next(e for e in app.expander if e.label == 'View Detailed Fiber Analysis')
-    if len(details.get('image')) != 4 or len(app.main.get('image')) != 5:
+    if len(details.get('image')) != 4 or len(app.main.get('component_instance')) != 1:
         raise RuntimeError('Bundled detailed analysis must retain all four stages.')
+    from collagen.learning import FEATURE_NAMES, fit_classifier, predict
+    samples = [dict(image_key=str(i), label='accepted' if label else 'rejected',
+                    features=[float(label)] * len(FEATURE_NAMES))
+               for i in range(2) for label in (0,1) for _ in range(5)]
+    fitted = fit_classifier(samples)
+    if predict(fitted, [[0.] * len(FEATURE_NAMES), [1.] * len(FEATURE_NAMES)]).tolist() != [False,True]:
+        raise RuntimeError('Bundled feedback classifier fitting/inference failed.')
     if sys.platform == 'win32':
         import tkinter as tk
         set_desktop_identity()
@@ -182,7 +198,17 @@ patcher.start()
 
 
 def smoke_test():
-    self_test()
+    # Never register synthetic smoke-test reviews in a user's persistent data.
+    previous = os.environ.get('COLLAGEN_FEEDBACK_DIR')
+    with tempfile.TemporaryDirectory(prefix='collagen-review-smoke-') as folder:
+        os.environ['COLLAGEN_FEEDBACK_DIR'] = folder
+        try:
+            self_test()
+        finally:
+            if previous is None:
+                os.environ.pop('COLLAGEN_FEEDBACK_DIR', None)
+            else:
+                os.environ['COLLAGEN_FEEDBACK_DIR'] = previous
     server = LocalServer()
     try:
         server.start()

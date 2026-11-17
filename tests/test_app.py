@@ -200,9 +200,13 @@ def test_primary_overlay_and_lazy_details_follow_actual_counts(uploads):
         counts = json.loads(app.json[0].value)
         assert counts['accepted_isolated_count'] == 1
         assert counts['review_required_count'] == 1
-        primary_images = app.main.get('image')
-        assert len(primary_images) == 1
-        assert 'green = included' in primary_images[0].proto.imgs[0].caption
+        assert len(app.main.get('image')) == 0
+        editors = app.main.get('component_instance')
+        assert len(editors) == 1
+        assert 'fiber_editor' in editors[0].proto.component_name
+        editor_args = json.loads(editors[0].proto.json_args)
+        assert editor_args['image'].startswith('data:image/png;base64,')
+        assert editor_args['context'] == app.session_state['review_context']
         details = next(e for e in app.expander if e.label == 'View Detailed Fiber Analysis')
         assert not details.proto.expanded
         assert len(details.get('image')) == 0
@@ -213,11 +217,73 @@ def test_primary_overlay_and_lazy_details_follow_actual_counts(uploads):
         details = next(e for e in app.expander if e.label == 'View Detailed Fiber Analysis')
         assert details.proto.expanded
         assert len(details.get('image')) == 4
-        assert len(app.main.get('image')) == 5  # primary plus four detailed stages
+        assert len(app.main.get('image')) == 4
+        assert len(app.main.get('component_instance')) == 1  # interactive primary plus four stages
         assert json.loads(app.json[0].value) == counts
         assert app.dataframe[0].value.equals(before)
         assert geometry.call_count == 1
         app.session_state['fiber_details'] = False
         app.run(timeout=30)
-        assert len(app.main.get('image')) == 1
+        assert len(app.main.get('image')) == 0
+        assert len(app.main.get('component_instance')) == 1
         assert geometry.call_count == 1
+
+
+def test_manual_buttons_update_csv_counts_restore_on_reopen_and_undo(uploads):
+    from collagen.pipeline import analyze_pixels
+    image=np.zeros((80,120),np.uint16)
+    image[30:39,15:100]=45000
+    uploads['image']=('review.tiff',image_bytes(image))
+    with patch('collagen.pipeline.analyze_pixels',wraps=analyze_pixels) as geometry:
+        app=submit(AppTest.from_file(APP).run(timeout=30))
+        length=app.dataframe[0].value.length_um.iloc[0]
+        widget(app,'button','Prepare QC archive').click().run(timeout=30)
+        assert 'archive' in app.session_state
+        widget(app,'button','Mark rejected').click().run(timeout=30)
+        assert not app.exception and not app.error
+        assert app.dataframe[0].value.classification.tolist()==['rejected']
+        assert json.loads(app.json[0].value)['accepted_measurement_count']==0
+        assert 'archive' not in app.session_state
+        assert geometry.call_count==1
+        reopened=submit(AppTest.from_file(APP).run(timeout=30))
+        assert reopened.dataframe[0].value.classification.tolist()==['rejected']
+        widget(reopened,'button','Undo last correction').click().run(timeout=30)
+        assert reopened.dataframe[0].value.classification.tolist()==['accepted']
+        assert reopened.dataframe[0].value.length_um.iloc[0]==length
+        assert json.loads(reopened.json[0].value)['accepted_measurement_count']==1
+        assert geometry.call_count==1
+
+
+def test_editor_event_updates_one_object_and_stale_replay_does_not_toggle_twice(uploads):
+    image=np.zeros((100,160),np.uint16)
+    image[20:29,20:120]=45000
+    image[40:49,20:120]=45000
+    uploads['image']=('click.tiff',image_bytes(image))
+    app=submit(AppTest.from_file(APP).run(timeout=30))
+    event=dict(action='toggle',token='ui-click-1',context=app.session_state['review_context'],x=25,y=24)
+    with patch('collagen.review_ui.fiber_editor',return_value=event):
+        app.run(timeout=30)
+        assert not app.exception
+        assert app.dataframe[0].value.classification.tolist()==['rejected','accepted']
+        app.run(timeout=30)
+        assert app.dataframe[0].value.classification.tolist()==['rejected','accepted']
+    bad={**event,'token':'different-token'}
+    with patch('collagen.review_ui.fiber_editor',return_value=bad):
+        app.run(timeout=30)
+        assert 'older image or review' in app.warning[0].value
+        assert app.dataframe[0].value.classification.tolist()==['rejected','accepted']
+
+
+def test_retrain_without_enough_reviews_explains_requirements(uploads):
+    image=np.zeros((80,120),np.uint16);image[30:39,15:100]=45000
+    uploads['image']=('small.tiff',image_bytes(image))
+    app=submit(AppTest.from_file(APP).run(timeout=30))
+    app.session_state['feedback_learning']=True
+    app.run(timeout=30)
+    widget(app,'button','Retrain Model Using Corrections').click()
+    # AppTest does not serialize expander state like the browser does.
+    app.session_state['feedback_learning']=True
+    app.run(timeout=30)
+    assert not app.exception and not app.error
+    assert app.warning, repr(app.session_state)
+    assert 'two training images' in app.warning[0].value
