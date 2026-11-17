@@ -1,0 +1,137 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<style>
+body{font:14px system-ui,sans-serif;color:#eee;background:transparent;margin:0}
+.tools{display:flex;gap:8px;align-items:center;flex-wrap:wrap;padding:5px 0}
+button{border:1px solid #777;border-radius:5px;padding:7px 10px;background:#262730;color:#fff;cursor:pointer}
+button[aria-pressed="true"]{border:2px solid #48dc86;padding:6px 9px}
+button:disabled{opacity:.45;cursor:wait}
+#viewport{overflow:auto;width:100%;max-height:600px;border:1px solid #777;border-radius:5px;background:#121212}
+canvas{display:block;cursor:crosshair;touch-action:pan-x pan-y}
+#status{min-height:20px;padding:5px 0}
+.green{color:#63f78a}.red{color:#ff7979}
+input{vertical-align:middle}
+</style>
+</head>
+<body>
+<div class="tools">
+ <button id="toggle" aria-pressed="true">Click to toggle</button>
+ <button id="outline" aria-pressed="false">Outline missed / merged fiber</button>
+ <button id="save" disabled>Save outline</button>
+ <button id="clear">Clear outline</button>
+ <button id="undo">Undo</button>
+ <label>Zoom <input aria-label="Zoom" id="zoom" type="range" min="50" max="800" value="100" step="25"> <span id="zoomLabel">100%</span></label>
+</div>
+<div id="viewport"><canvas id="image" aria-label="Interactive fiber classification image" tabindex="0"></canvas></div>
+<div id="status" role="status">Click a highlighted object to change only that object. Zoom in for small objects.</div>
+<div><span class="green">Green: accepted</span> · <span class="red">Red: rejected</span> · Measurements unavailable for ambiguous geometry remain flagged.</div>
+<script>
+'use strict';
+const canvas=document.getElementById('image'), ctx=canvas.getContext('2d');
+const viewport=document.getElementById('viewport'), zoom=document.getElementById('zoom');
+let args=null, image=null, mode='toggle', points=[], busy=false, lastSent=null, renderId=0, fit=1;
+let origin='*', down=null;
+function post(type, extra) {
+  window.parent.postMessage(Object.assign({isStreamlitMessage:true,type:type},extra||{}),origin);
+}
+function height() { post('streamlit:setFrameHeight',{height:document.body.scrollHeight+6}); }
+function controls() {
+  for(const id of ['toggle','outline','clear','undo']) document.getElementById(id).disabled=busy;
+  document.getElementById('save').disabled=busy || mode!=='outline' || points.length<3;
+}
+function status(text) { document.getElementById('status').textContent=text; }
+function draw() {
+  if(!image)return;
+  ctx.clearRect(0,0,canvas.width,canvas.height);
+  ctx.drawImage(image,0,0);
+  if(points.length) {
+    ctx.lineWidth=2/(fit*Number(zoom.value)/100);
+    ctx.strokeStyle='#ffd43b';ctx.fillStyle='#ffd43b';ctx.beginPath();
+    points.forEach(function(p,i){if(i===0)ctx.moveTo(p[0],p[1]);else ctx.lineTo(p[0],p[1]);});
+    ctx.stroke();
+    for(const p of points){ctx.beginPath();ctx.arc(p[0],p[1],3/(fit*Number(zoom.value)/100),0,2*Math.PI);ctx.fill();}
+  }
+}
+function resize() {
+  if(!image)return;
+  const oldScale=parseFloat(canvas.style.width)/canvas.width || fit;
+  const cx=(viewport.scrollLeft+viewport.clientWidth/2)/oldScale;
+  const cy=(viewport.scrollTop+viewport.clientHeight/2)/oldScale;
+  fit=Math.min(1,Math.max(1,viewport.clientWidth-2)/image.width);
+  const scale=fit*Number(zoom.value)/100;
+  canvas.style.width=image.width*scale+'px';
+  canvas.style.height=image.height*scale+'px';
+  viewport.style.height=Math.min(600,image.height*fit+2)+'px';
+  viewport.scrollLeft=Math.max(0,cx*scale-viewport.clientWidth/2);
+  viewport.scrollTop=Math.max(0,cy*scale-viewport.clientHeight/2);
+  document.getElementById('zoomLabel').textContent=zoom.value+'%';
+  draw();height();
+}
+function send(action, extra) {
+  if(busy || !args)return;
+  busy=true;
+  const token=window.crypto.randomUUID ? window.crypto.randomUUID() : Date.now()+'-'+Math.random();
+  lastSent=Object.assign({action:action,token:token,context:args.context},extra||{});
+  controls();status('Saving…');
+  post('streamlit:setComponentValue',{value:lastSent,dataType:'json'});
+}
+function setMode(value) {
+  if(busy)return;
+  mode=value;
+  document.getElementById('toggle').setAttribute('aria-pressed',String(mode==='toggle'));
+  document.getElementById('outline').setAttribute('aria-pressed',String(mode==='outline'));
+  status(mode==='outline' ? 'Click around one fiber boundary, then Save outline. Accepted overlaps must be rejected first. Backspace removes the last point.' : 'Click a highlighted object to toggle its classification. Background clicks do not select nearby fibers.');
+  controls();draw();
+}
+document.getElementById('toggle').onclick=function(){setMode('toggle');};
+document.getElementById('outline').onclick=function(){setMode('outline');};
+document.getElementById('clear').onclick=function(){points=[];controls();draw();};
+document.getElementById('save').onclick=function(){send('outline',{points:points});};
+document.getElementById('undo').onclick=function(){send('undo');};
+zoom.oninput=resize;
+canvas.onpointerdown=function(e){down={x:e.clientX,y:e.clientY};};
+canvas.onpointerup=function(e) {
+  if(busy || !args || !down || Math.hypot(e.clientX-down.x,e.clientY-down.y)>5)return;
+  down=null;
+  const r=canvas.getBoundingClientRect();
+  const x=(e.clientX-r.left)*canvas.width/r.width, y=(e.clientY-r.top)*canvas.height/r.height;
+  if(x<0 || y<0 || x>=canvas.width || y>=canvas.height)return;
+  if(mode==='outline'){
+    if(points.length>=512){status('Maximum 512 vertices. Save or clear this outline.');return;}
+    points.push([x,y]);controls();draw();
+  } else send('toggle',{x:x,y:y});
+};
+canvas.onkeydown=function(e){
+  if(e.key==='Backspace' && mode==='outline' && !busy){e.preventDefault();points.pop();controls();draw();}
+  if((e.ctrlKey||e.metaKey) && e.key==='z'){e.preventDefault();send('undo');}
+};
+window.addEventListener('message',function(event){
+  if(event.source!==window.parent || !event.data || event.data.type!=='streamlit:render')return;
+  origin=event.origin;
+  args=event.data.args;
+  if(lastSent && args.ack_token===lastSent.token){
+    busy=false;
+    if(lastSent.action==='outline' && args.event_ok)points=[];
+    lastSent=null;
+  }
+  if(!busy)status(args.message || (mode==='outline' ? 'Trace one fiber boundary, then Save outline.' : 'Click a highlighted object to toggle its classification. Zoom in for small objects.'));
+  controls();
+  const id=++renderId, nextImage=new Image();
+  nextImage.onload=function(){
+    if(id!==renderId)return;
+    const changed=!image || image.width!==nextImage.width || image.height!==nextImage.height;
+    image=nextImage;canvas.width=image.width;canvas.height=image.height;
+    if(changed){canvas.style.width='';canvas.style.height='';}
+    resize();
+  };
+  nextImage.src=args.image;
+});
+window.addEventListener('resize',resize);
+post('streamlit:componentReady',{apiVersion:1});
+height();
+</script>
+</body>
+</html>

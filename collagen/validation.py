@@ -30,14 +30,19 @@ def compare_ground_truth(measured, manual):
     measured, manual = tables
     if "review_status" not in measured or not measured.review_status.isin(["accepted", "review_required"]).all():
         raise ValueError("Analysis CSV needs review_status: accepted or review_required for each candidate.")
-    joined = measured[required + ["review_status"]].merge(
+    policy = 'included_in_measurement_statistics'
+    if policy in measured and not measured[policy].isin([True,False]).all():
+        raise ValueError('Measurement inclusion must be explicitly true or false.')
+    joined = measured[required + ["review_status"] + ([policy] if policy in measured else [])].merge(
         manual[required], on=KEYS, how="outer",
         suffixes=("_auto", "_manual"), indicator=True, validate="one_to_one",
     )
     accepted = joined["_merge"].eq("both") & joined.review_status.eq("accepted")
     joined["accepted_matched"] = accepted
+    eligible = accepted & joined[policy].eq(True) if policy in joined else accepted
+    joined['measurement_eligible_matched'] = eligible
     for metric in METRICS:
-        included = accepted & joined[metric + "_auto"].notna() & joined[metric + "_manual"].notna()
+        included = eligible & joined[metric + "_auto"].notna() & joined[metric + "_manual"].notna()
         joined[metric + "_included"] = included
         joined[metric + "_error"] = (joined[metric + "_auto"] - joined[metric + "_manual"]).where(included)
         joined[metric + "_relative_error_pct"] = 100 * joined[metric + "_error"] / joined[metric + "_manual"]
@@ -77,7 +82,8 @@ def comparison_report(measured, manual):
         metrics.append({
             "measurement": metric,
             "paired_count": int(errors.size),
-            "missing_pair_count": int(accepted.sum() - errors.size),
+            "missing_pair_count": int(rows.measurement_eligible_matched.sum() - errors.size),
+            'excluded_by_measurement_policy_count': int((accepted & ~rows.measurement_eligible_matched).sum()),
             "bias_um": float(errors.mean()),
             "mean_absolute_error_um": float(errors.abs().mean()),
         })

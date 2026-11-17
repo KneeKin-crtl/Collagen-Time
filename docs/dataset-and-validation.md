@@ -1,9 +1,11 @@
 # Microscopy dataset preparation
 
 Target workstation: Windows 11 Pro, Intel i9-13900, 64 GB RAM, NVIDIA RTX 4090.
-The current application is a conventional CPU baseline. No trained AI model or
-CUDA dependency is included. Model training is deliberately deferred until the
-baseline can be validated against real images and annotations are reviewed.
+The application preserves its conventional CPU segmentation and measurements.
+No pretrained model or CUDA dependency is included. An experimental object
+classifier can be trained from reviewed corrections with separate held-out images;
+see [manual review and learning](feedback-learning.md). Segmentation-model training
+and scientific accuracy claims still require real-image validation and reviewed masks.
 
 ## Files and correspondence
 

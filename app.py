@@ -12,6 +12,7 @@ from collagen.validation import comparison_report
 from collagen.workbook import import_workbook, workbook_summary, image_manifest
 from collagen.resources import asset_path
 from collagen.visualization import count_overlay, display_rgb
+from collagen.review_ui import reviewed_results
 
 
 @st.cache_data(show_spinner=False, max_entries=2)
@@ -31,7 +32,7 @@ def cached_pixels(data, filename, settings):
 
 st.set_page_config(page_title='Collagen Fiber Analyzer', page_icon=str(asset_path('collagen.png')), layout='wide')
 st.title('Collagen Fiber Analyzer')
-st.caption('Non-AI research baseline. Distance-transform width is approximate. Scientific accuracy on real microscopy images has not been established.')
+st.caption('Conventional segmentation with optional feedback-trained object classification. Distance-transform width is approximate. Scientific accuracy on real microscopy images has not been established.')
 st.caption('Use originals. Review unclear/bunched candidates. Analysis runs only when you press Analyze image; results reflect the last submitted settings.')
 upload = st.file_uploader('Microscopy image (single plane)', type=['tif', 'tiff', 'png', 'jpg', 'jpeg'])
 image, proposal, data, image_key = None, None, None, None
@@ -114,10 +115,7 @@ if request is not None and image is not None and request['image_key'] == image_k
         result.parameters.update(source_sha256=hashlib.sha256(data).hexdigest(),
                                  calibration_source='entered by operator for this original image',
                                  scale_bar_review=request['scale_bar_review'])
-        st.json(result.summary)
-        st.image(count_overlay(result.original, result.labels, result.table),
-                 caption='Fiber counting results: green = included in the final count; red = identified candidates excluded from the final count.')
-        st.caption(f"Green: {result.summary['accepted_isolated_count']} counted fibers · Red: {result.summary['review_required_count']} excluded candidates. Colors follow the API counting decisions. Unlabeled areas remain unchanged; they are not automatically excluded fibers.")
+        result = reviewed_results(result, upload.name, hashlib.sha256(data).hexdigest())
         details = st.expander('View Detailed Fiber Analysis', expanded=False,
                               key='fiber_details', on_change='rerun')
         if details.open:
@@ -129,6 +127,10 @@ if request is not None and image is not None and request['image_key'] == image_k
                 cols[1].image(result.annotated, caption='Detailed IDs and centerlines: green counted; red excluded; rectangles mark excluded regions')
         st.dataframe(result.table, hide_index=True)
         st.download_button('Download per-fiber CSV', csv_bytes(result.table), 'fibers.csv', 'text/csv')
+        if 'included_in_measurement_statistics' in result.table:
+            st.download_button('Download measurable accepted fibers CSV',
+                               csv_bytes(result.table[result.table.included_in_measurement_statistics.astype(bool)]),
+                               'accepted_measurements.csv', 'text/csv')
         if st.button('Prepare QC archive'):
             with st.spinner('Preparing QC archive…'):
                 st.session_state['archive'] = result_archive(result)
@@ -139,7 +141,7 @@ if request is not None and image is not None and request['image_key'] == image_k
             report = comparison_report(result.table, pd.read_csv(manual))
             st.subheader('ImageJ comparison')
             st.json(report.counts)
-            st.caption('Errors use accepted matched fibers with both measurements present, separately for length and diameter. Bias = mean(automated − manual); MAE = mean absolute error, in µm. Empty statistics mean no usable pairs. Unmatched IDs describe coverage, not detection accuracy.')
+            st.caption('Errors use measurable accepted matched fibers with both measurements present, separately for length and diameter. Manual acceptance does not bypass incomplete-geometry exclusions. Bias = mean(automated − manual); MAE = mean absolute error, in µm. Empty statistics mean no usable pairs. Unmatched IDs describe coverage, not detection accuracy.')
             st.dataframe(report.metrics, hide_index=True)
             st.dataframe(report.rows, hide_index=True)
             st.download_button('Download comparison', csv_bytes(report.rows), 'comparison.csv', 'text/csv')

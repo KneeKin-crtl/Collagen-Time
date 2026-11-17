@@ -24,6 +24,8 @@ class Analysis:
     table: pd.DataFrame
     summary: dict
     parameters: dict = field(default_factory=dict)
+    baseline_labels: np.ndarray | None = None
+    manual_masks: list = field(default_factory=list)
 
 
 @dataclass

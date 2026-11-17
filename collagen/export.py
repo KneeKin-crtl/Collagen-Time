@@ -23,4 +23,14 @@ def result_archive(result):
         summary = {k: (None if isinstance(v, float) and not np.isfinite(v) else v) for k, v in result.summary.items()}
         archive.writestr("summary.json", json.dumps(summary, indent=2, allow_nan=False))
         archive.writestr("analysis_parameters.json", json.dumps(result.parameters, indent=2, allow_nan=False))
+        if result.baseline_labels is not None:
+            buffer = BytesIO()
+            tifffile.imwrite(buffer, result.baseline_labels.astype(np.uint32))
+            archive.writestr('baseline_labels.tiff', buffer.getvalue())
+            if result.manual_masks:
+                buffer = BytesIO()
+                masks = {f'mask_{fiber_id}': mask for fiber_id, bbox, mask in result.manual_masks}
+                masks.update({f'bbox_yxyx_{fiber_id}': np.asarray(bbox) for fiber_id,bbox,mask in result.manual_masks})
+                np.savez_compressed(buffer, **masks)
+                archive.writestr('manual_masks.npz', buffer.getvalue())
     return output.getvalue()

@@ -9,13 +9,23 @@ Collagen Fiber Analyzer - Windows 10/11 x64
 6. Review the proposed scale-bar/text preview. Choose Exclude rectangle (adjust
    coordinates as needed), or explicitly confirm no exclusion is needed.
    Dark fibers on a light background is now the default polarity.
-7. Press Analyze image. The primary image overlays green counted fibers and red
-   excluded candidates using the actual counting decisions. Open View Detailed
+7. Press Analyze image. Click a highlighted object to toggle accepted (green) /
+   rejected (red); zoom in for small objects and use Undo for mistakes.
+   Green counts accepted objects; only measurable accepted fibers enter measurement
+   statistics. Ambiguous geometry remains flagged. Open View Detailed
    Fiber Analysis to inspect the original, mask, labels, and detailed centerlines.
    Excluded candidates remain flagged in the CSV and are omitted from accepted
    statistics. Use Prepare QC archive to generate the complete ZIP when needed;
    it also contains the primary count_overlay.tiff.
-8. Close the launcher window to stop the local analyzer.
+8. Use Outline missed / merged fiber to trace an individual boundary and Save
+   outline. Explicitly reject overlapping accepted objects first.
+9. Corrections save automatically under LOCALAPPDATA/CollagenFiberAnalyzer/feedback.
+   In Feedback learning, model evaluation and backups, reserve whole images for
+   evaluation and use Retrain Model Using Corrections after reviewing at least two
+   training and two evaluation images, with five accepted and five rejected objects
+   in each role. Only a model passing the improvement gate becomes active.
+   Download a feedback database backup before moving to another computer.
+10. Close the launcher window to stop the local analyzer.
 
 The executable includes the green/red collagen icon. For a desktop shortcut,
 right-click CollagenFiberAnalyzer.exe > Show more options > Send to > Desktop
@@ -25,7 +35,8 @@ The packaged application runs locally and needs no Python installation or
 Internet connection for analysis. Downloading the ZIP requires Internet access.
 The baseline runs on the CPU; no GPU/CUDA installation is needed.
 
-This is the conventional baseline. It does not contain a trained AI model.
+No pretrained model is bundled. The optional feedback classifier is experimental;
+it changes acceptance suggestions, not segmentation. Human overrides take priority.
 Distance-transform diameter is approximate. Accuracy on real microscopy data
 has not yet been established. Only clear, separated fibers should be accepted;
 review excluded candidates and inspect accepted ones for missed merges.
