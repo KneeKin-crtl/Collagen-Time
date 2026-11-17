@@ -1,0 +1,40 @@
+{
+  "resolution": [
+    4096,
+    3072
+  ],
+  "objects": 400,
+  "samples": 8,
+  "metric": "pointerup to next animation frame after changed object pixel",
+  "visual": {
+    "median_ms": 29.25,
+    "p95_ms": 158.39999999850988,
+    "samples_ms": [
+      51.79999999888241,
+      158.39999999850988,
+      22.800000000745058,
+      25.09999999962747,
+      36.69999999925494,
+      23.90000000037253,
+      25,
+      33.40000000037253
+    ]
+  },
+  "server_ack": {
+    "median_ms": 505.5,
+    "p95_ms": 1059.699999999255,
+    "samples_ms": [
+      1059.699999999255,
+      784.6999999992549,
+      439.80000000074506,
+      545.1999999992549,
+      518.5999999996275,
+      492.40000000037253,
+      376.19999999925494,
+      403.69999999925494
+    ]
+  },
+  "browser": "151.0.7922.173",
+  "platform": "Linux-6.18.57-x86_64-with-glibc2.41",
+  "note": "Controlled local benchmark; no latency guarantee for other hardware or scientific accuracy claim."
+}

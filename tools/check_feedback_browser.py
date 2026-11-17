@@ -22,16 +22,18 @@ import urllib.request
 import zlib
 import zipfile
 
-from playwright.sync_api import sync_playwright
+from playwright.sync_api import sync_playwright, expect
 
 
-def synthetic_png(path):
+def synthetic_png(path, variant=False):
     # Mid-gray microscopy-like background makes plain black ID glyphs visible.
     # Larger than either result column: exercise fit-to-width and source mapping.
     rows = [bytearray([80]*1280) for _ in range(800)]
     for y0,y1,x0,x1 in ((30,41,30,140),(70,81,30,140),(110,121,0,140)):
         for y in range(y0,y1):
             rows[y][x0:x1] = bytes([200]) * (x1-x0)
+    if variant:
+        rows[-1][-1]=79  # Different original identity without adding a bright object.
     def chunk(kind, data):
         return struct.pack('!I',len(data)) + kind + data + struct.pack('!I',zlib.crc32(kind+data))
     raw = b''.join(b'\x00' + row for row in rows)
@@ -49,6 +51,7 @@ def interactions(browser, url, root, output):
     def open_analysis():
         page.goto(url)
         page.get_by_role('heading',name='Collagen Fiber Analyzer',exact=True).wait_for()
+        page.get_by_text('Review ImageJ Excel workbook',exact=True).wait_for()
         page.locator('input[type=file]').first.set_input_files(str(root/'synthetic.png'))
         # Wait for the image-specific form, rather than typing into the initial
         # empty-upload calibration widget while upload processing is in flight.
@@ -60,6 +63,19 @@ def interactions(browser, url, root, output):
         page.get_by_role('button',name='Analyze image',exact=True).click()
         editor().locator('#image').wait_for(state='visible',timeout=30000)
         editor().locator('#original-image').wait_for(state='visible',timeout=30000)
+        editor().locator('#toggle').wait_for(state='visible',timeout=30000)
+        editor().locator('#clickMode').select_option('toggle')
+        wait_saved()
+    def wait_saved():
+        deadline=time.monotonic()+30
+        while time.monotonic()<deadline:
+            with suppress(Exception):
+                if editor().locator('#image').get_attribute('data-pending-count')=='0' and editor().locator('#toggle').is_enabled():
+                    assert editor().locator('#image').evaluate('(c)=>[c.width,c.height]')==[1280,800]
+                    assert editor().locator('#original-image').evaluate('(c)=>[c.width,c.height]')==[1280,800]
+                    return
+            time.sleep(.1)
+        raise AssertionError('Review did not finish saving.')
     def color(x,y):
         return editor().locator('#image').evaluate(
             '(c,p)=>Array.from(c.getContext("2d").getImageData(p[0],p[1],1,1).data)',[x,y])[:3]
@@ -93,21 +109,29 @@ def interactions(browser, url, root, output):
         assert original.evaluate('(c)=>Array.from(c.getContext("2d").getImageData(50,35,1,1).data)') == [200,200,200,255]
         assert original.evaluate('(c)=>Array.from(c.getContext("2d").getImageData(500,500,1,1).data)') == [80,80,80,255]
     def id_labels():
-        return json.loads(editor().locator('#image').get_attribute('data-id-labels'))
+        deadline=time.monotonic()+30
+        while time.monotonic()<deadline:
+            with suppress(Exception):
+                value=editor().locator('#image').get_attribute('data-id-labels')
+                if value is not None:return json.loads(value)
+            time.sleep(.05)
+        raise AssertionError('ID metadata did not finish loading.')
     def assert_ids(expected):
         actual=id_labels()
         assert [item['fiber_id'] for item in actual]==expected, actual
         assert all(item['text']==str(item['fiber_id']) for item in actual)
+        assert color(500,500)==[80,80,80], 'Cached display pixels were lost across a review rerun.'
     def wait_color(x,y,green):
         deadline = time.monotonic() + 30
         while time.monotonic() < deadline:
             with suppress(Exception):
                 value = color(x,y)
                 if (value[1] > value[0] if green else value[0] > value[1]):
+                    wait_saved()
                     return
             time.sleep(.1)
         raise AssertionError(('Color did not update',x,y,green,color(x,y)))
-    def click(x,y):
+    def click(x,y,button='left'):
         canvas = editor().locator('#image')
         canvas.scroll_into_view_if_needed()
         canvas.evaluate('''(c,p)=>{
@@ -117,7 +141,7 @@ def interactions(browser, url, root, output):
         }''',[x,y])
         box = canvas.bounding_box()
         width,height = canvas.evaluate('(c)=>[c.width,c.height]')
-        page.mouse.click(box['x']+x*box['width']/width,box['y']+y*box['height']/height)
+        page.mouse.click(box['x']+x*box['width']/width,box['y']+y*box['height']/height,button=button)
     def states():
         with closing(sqlite3.connect(root/'data'/'feedback.sqlite3')) as con:
             return con.execute('SELECT fiber_id,manual_classification,active FROM objects ORDER BY fiber_id').fetchall()
@@ -215,14 +239,111 @@ def interactions(browser, url, root, output):
         time.sleep(.1)
     assert (4,None,0) in states()
     # Wait for the same update to reach the displayed image, not just SQLite.
-    deadline=time.monotonic()+20
-    while time.monotonic()<deadline and [i['fiber_id'] for i in id_labels()]!=[2]:
-        time.sleep(.1)
+    wait_saved()
     assert_ids([2])
     print('Corrections and Undo survived reopening',flush=True)
+    # Redo must restore the same manual ID/mask/measurements, including after
+    # reopening; shortcuts only act when the image has keyboard focus.
+    wait_saved()
+    editor().locator('#image').focus()
+    page.keyboard.press('Control+y')
+    wait_color(240,125,True)
+    assert_ids([2,4])
+    editor().locator('#image').focus()
+    page.keyboard.press('Control+z')
+    wait_saved()
+    assert_ids([2])
+    editor().locator('#clickMode').select_option('accept_reject')
+    click(50,75,button='right')
+    wait_color(50,75,False)
+    assert_ids([])
+    click(50,75)
+    wait_color(50,75,True)
+    assert_ids([2])
+    # Several input events in one browser task exercise the queue while one
+    # correction is in flight. Each event must be persisted exactly once.
+    with closing(sqlite3.connect(root/'data'/'feedback.sqlite3')) as con:
+        before_events=con.execute('SELECT COUNT(*) FROM events').fetchone()[0]
+    editor().locator('#image').evaluate('''c=>{
+      c.focus();for(const key of ['r','a','r','a','r','a'])c.dispatchEvent(new KeyboardEvent('keydown',{key,bubbles:true}));
+    }''')
+    wait_saved()
+    with closing(sqlite3.connect(root/'data'/'feedback.sqlite3')) as con:
+        assert con.execute('SELECT COUNT(*) FROM events').fetchone()[0]==before_events+6
+    wait_color(50,75,True)
+    assert_ids([2])
+    assert (1,'rejected',1) in states() and (2,'accepted',1) in states()
+    assert int(editor().locator('#image').get_attribute('data-reviewed-count'))>=2
+    # A stale event must roll back its local preview and must not enter history.
+    editor().locator('#image').evaluate('''c=>{
+      args.context='deliberately-stale-test';c.focus();
+      c.dispatchEvent(new KeyboardEvent('keydown',{key:'r',bubbles:true}));
+    }''')
+    wait_saved()
+    wait_color(50,75,True)
+    page.get_by_text('This click belongs to an older image or review. Click again on the current image.',exact=True).wait_for()
+    with closing(sqlite3.connect(root/'data'/'feedback.sqlite3')) as con:
+        assert con.execute('SELECT COUNT(*) FROM events').fetchone()[0]==before_events+6
+    assert_ids([2])
+    # Hiding is display-only; automatically excluded border object 3 is retained.
+    before_states=states()
+    editor().locator('#viewMode').select_option('hide_auto')
+    assert color(50,115)==[200,200,200]
+    assert color(50,35)[0]>color(50,35)[1]  # Manual rejection remains visible.
+    editor().locator('#viewMode').select_option('review')
+    assert color(50,75)==[200,200,200]
+    assert color(50,115)[0]>color(50,115)[1]
+    editor().get_by_role('button',name='Next unreviewed (N)',exact=True).click()
+    assert 'Fiber 3:' in editor().locator('#selected').inner_text()
+    assert states()==before_states
+    editor().locator('#viewMode').select_option('all')
+    assert original_pixels()==original_before
+    print('Left/right click, shortcuts, redo, rapid queued saves, rollback and display filters passed',flush=True)
+    # A new image starts with no human overrides. Research exclusion is soft;
+    # calibrated pixel reliability is a measurement gate, not a color toggle.
+    synthetic_png(root/'range.png',variant=True)
+    page.locator('input[type=file]').first.set_input_files(str(root/'range.png'))
+    calibration=page.get_by_role('spinbutton',name='Calibration (µm/pixel)',exact=True)
+    expect(calibration).to_have_value('',timeout=30000)
+    calibration.fill('.5');calibration.press('Tab')
+    page.get_by_text('Fiber selection and measurement eligibility',exact=True).click()
+    page.get_by_text('Enable research-interest diameter range',exact=True).click()
+    page.get_by_role('button',name='Analyze image',exact=True).click()
+    wait_saved()
+    wait_color(50,35,False)
+    assert_ids([])
+    # The same default click mode is accept/reject in this new image session.
+    click(50,35)
+    wait_color(50,35,True)
+    assert_ids([1])
+    # Newly accepted IDs must have real glyph pixels, not only metadata.
+    with_ids=editor().locator('#image').evaluate('(c)=>c.toDataURL()')
+    editor().locator('#showIds').uncheck()
+    assert editor().locator('#image').evaluate('(c)=>c.toDataURL()')!=with_ids
+    editor().locator('#showIds').check()
+    with page.expect_download() as downloaded:
+        page.get_by_role('button',name='Download per-fiber CSV',exact=True).click()
+    downloaded.value.save_as(output/'range-fibers.csv')
+    with (output/'range-fibers.csv').open(encoding='utf-8',newline='') as csv_file:
+        range_rows=list(csv.DictReader(csv_file))
+    assert len(range_rows)==3 and range_rows[0]['automatic_category']=='out_of_range'
+    assert range_rows[0]['selection_category']=='accepted' and range_rows[1]['selection_category']=='out_of_range'
+    assert range_rows[0]['manual_classification']=='accepted'
+    assert float(range_rows[0]['mean_diameter_nm'])==float(range_rows[0]['mean_diameter_um'])*1000
+    width=page.get_by_role('spinbutton',name='Minimum reliable mean width (pixels)',exact=True)
+    width.fill('100');width.press('Tab')
+    page.get_by_role('button',name='Analyze image',exact=True).click()
+    page.get_by_text('Some objects you marked as real fibers still fail measurement eligibility and remain red.',exact=False).wait_for()
+    wait_saved()
+    wait_color(50,35,False)
+    assert_ids([])
+    assert original_pixels()==original_before or editor().locator('#original-image').evaluate(
+        '(c)=>Array.from(c.getContext("2d").getImageData(500,500,1,1).data)')==[80,80,80,255]
+    page.screenshot(path=str(output/'selection-review.png'),full_page=True)
+    print('Research range, manual override, pixel reliability gate and calibrated CSV fields passed',flush=True)
     page.get_by_text('Feedback learning, model evaluation and backups',exact=True).click()
     page.get_by_role('button',name='Retrain Model Using Corrections',exact=True).click()
-    page.get_by_text('Review at least two training images and two separate evaluation images before retraining.',
+    page.get_by_text('Each dataset role needs at least five explicitly reviewed accepted and five rejected examples.',
                      exact=True).wait_for(timeout=20000)
     assert not errors, errors
     report = dict(exact_object_click=True,zoom_mapping=True,manual_outline=True,csv_updated=True,
@@ -231,6 +352,9 @@ def interactions(browser, url, root, output):
                   label_manifest_matches_csv=True,
                   original_and_analysis_side_by_side=True,matching_scale_and_aspect_ratio=True,
                   responsive_stacking=True,original_unchanged_by_review=True,synchronized_zoom_and_scroll=True,
+                  left_accept_right_reject=True,keyboard_shortcuts=True,persistent_redo=True,
+                  rapid_queue_exactly_once=True,failed_save_rollback=True,display_filters_only=True,review_progress=True,
+                  research_range_filter=True,manual_range_override=True,reliability_gate=True,calibrated_csv_fields=True,
                   browser_errors=errors)
     (output/'report.json').write_text(json.dumps(report,indent=2),encoding='utf-8')
     print('Browser interaction checks passed',flush=True)

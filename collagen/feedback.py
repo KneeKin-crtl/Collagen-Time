@@ -89,7 +89,8 @@ CREATE TABLE IF NOT EXISTS events (
  object_key TEXT NOT NULL REFERENCES objects, action TEXT NOT NULL,
  before_classification TEXT, after_classification TEXT, before_active INTEGER NOT NULL,
  after_active INTEGER NOT NULL, automatic_classification TEXT NOT NULL, model_id TEXT,
- undo_target INTEGER UNIQUE REFERENCES events, event_token TEXT NOT NULL UNIQUE, created_at TEXT NOT NULL);
+ undo_target INTEGER UNIQUE REFERENCES events, event_token TEXT NOT NULL UNIQUE, created_at TEXT NOT NULL,
+ selection_context TEXT);
 CREATE TABLE IF NOT EXISTS models (
  model_id TEXT PRIMARY KEY, created_at TEXT NOT NULL, payload TEXT NOT NULL,
  report TEXT NOT NULL, approved INTEGER NOT NULL, active INTEGER NOT NULL DEFAULT 0);
@@ -113,6 +114,10 @@ class FeedbackStore:
             con.executescript(SCHEMA)
             if con.execute("SELECT value FROM meta WHERE key='schema_version'").fetchone()[0] != 1:
                 raise ValueError('Unsupported feedback database version. Preserve this database before upgrading.')
+            # Additive migration keeps existing corrections, models and legacy
+            # Undo chains intact. Older code ignores the optional audit column.
+            if 'selection_context' not in {row['name'] for row in con.execute('PRAGMA table_info(events)')}:
+                con.execute('ALTER TABLE events ADD COLUMN selection_context TEXT')
 
     @contextmanager
     def connect(self):
@@ -202,19 +207,21 @@ class FeedbackStore:
         con.execute('UPDATE images SET role=? WHERE image_key=?', (role, row['image_key']))
 
     @staticmethod
-    def event(con, analysis_key, obj, action, label, active, automatic, model_id, token, undo_target=None):
+    def event(con, analysis_key, obj, action, label, active, automatic, model_id, token, undo_target=None,
+              selection_context=None):
         cursor = con.execute('''INSERT INTO events
             (analysis_key,object_key,action,before_classification,after_classification,before_active,
-             after_active,automatic_classification,model_id,undo_target,event_token,created_at)
-             VALUES (?,?,?,?,?,?,?,?,?,?,?,?)''',
+             after_active,automatic_classification,model_id,undo_target,event_token,created_at,selection_context)
+             VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)''',
                              (analysis_key, obj['object_key'], action, obj['manual_classification'], label,
-                              obj['active'], active, automatic, model_id, undo_target, token, FeedbackStore.now()))
+                              obj['active'], active, automatic, model_id, undo_target, token, FeedbackStore.now(),
+                              dumps(selection_context) if selection_context is not None else None))
         con.execute('UPDATE objects SET manual_classification=?,active=?,state_event=? WHERE object_key=?',
                     (label, active, cursor.lastrowid, obj['object_key']))
         return cursor.lastrowid
 
     def correct(self, analysis_key, fiber_id, label, role, automatic, model_id=None, token=None,
-                expected_revision=None):
+                expected_revision=None, selection_context=None):
         if label not in ('accepted', 'rejected'):
             raise ValueError('Classification must be accepted or rejected.')
         token = token or uuid.uuid4().hex
@@ -228,7 +235,8 @@ class FeedbackStore:
             if not obj:
                 raise ValueError('Select an active object in this analysis.')
             self.assign_role(con, analysis_key, role)
-            self.event(con, analysis_key, obj, 'classification', label, 1, automatic, model_id, token)
+            self.event(con, analysis_key, obj, 'classification', label, 1, automatic, model_id, token,
+                       selection_context=selection_context)
             self.bump(con)
         return True
 
@@ -237,7 +245,7 @@ class FeedbackStore:
         if expected is not None and con.execute("SELECT value FROM meta WHERE key='revision'").fetchone()[0] != expected:
             raise ValueError('The review changed. Try again on the refreshed image.')
 
-    def add(self, analysis_key, obj, role, token=None, expected_revision=None):
+    def add(self, analysis_key, obj, role, token=None, expected_revision=None, selection_context=None):
         with self.connect() as con:
             con.execute('BEGIN IMMEDIATE')
             if token and con.execute('SELECT 1 FROM events WHERE event_token=?', (token,)).fetchone():
@@ -249,23 +257,53 @@ class FeedbackStore:
             self.insert_object(con, analysis_key, obj)
             before = {**obj, 'active': 0}
             self.event(con, analysis_key, before, 'outline', 'accepted', 1, 'not_detected', None,
-                       token or uuid.uuid4().hex)
+                       token or uuid.uuid4().hex, selection_context=selection_context)
             self.bump(con)
         return obj['fiber_id']
 
-    def undo(self, analysis_key, expected_revision=None):
+    @staticmethod
+    def history_stacks(con, analysis_key):
+        """Replay audit links, including legacy Undo records, into two stacks.
+
+        Each Undo/Redo links to the current head of its action chain, so the
+        existing unique undo_target constraint remains valid on repeated cycles.
+        A fresh correction clears the redo stack without deleting any history.
+        """
+        undo, redo = [], []
+        for row in con.execute('SELECT * FROM events WHERE analysis_key=? ORDER BY event_id', (analysis_key,)):
+            event = dict(row)
+            if event['action'] in ('classification', 'outline'):
+                undo.append((event, event['event_id']))
+                redo.clear()
+            elif event['action'] in ('undo', 'redo'):
+                source, target = (undo, redo) if event['action'] == 'undo' else (redo, undo)
+                if source and source[-1][1] == event['undo_target']:
+                    root, _ = source.pop()
+                    target.append((root, event['event_id']))
+        return undo, redo
+
+    def undo(self, analysis_key, expected_revision=None, token=None):
+        return self._history_move(analysis_key, expected_revision, token, 'undo')
+
+    def redo(self, analysis_key, expected_revision=None, token=None):
+        return self._history_move(analysis_key, expected_revision, token, 'redo')
+
+    def _history_move(self, analysis_key, expected_revision, token, action):
         with self.connect() as con:
             con.execute('BEGIN IMMEDIATE')
-            self.check_revision(con, expected_revision)
-            event = con.execute('''SELECT e.* FROM events e WHERE e.analysis_key=?
-                AND e.action IN ('classification','outline')
-                AND NOT EXISTS(SELECT 1 FROM events u WHERE u.undo_target=e.event_id)
-                ORDER BY e.event_id DESC LIMIT 1''', (analysis_key,)).fetchone()
-            if not event:
+            if token and con.execute('SELECT 1 FROM events WHERE event_token=?', (token,)).fetchone():
                 return False
+            self.check_revision(con, expected_revision)
+            undo, redo = self.history_stacks(con, analysis_key)
+            stack = undo if action == 'undo' else redo
+            if not stack:
+                return False
+            event, head = stack[-1]
             obj = con.execute('SELECT * FROM objects WHERE object_key=?', (event['object_key'],)).fetchone()
-            self.event(con, analysis_key, obj, 'undo', event['before_classification'], event['before_active'],
-                       event['automatic_classification'], event['model_id'], uuid.uuid4().hex, event['event_id'])
+            state = 'before' if action == 'undo' else 'after'
+            self.event(con, analysis_key, obj, action, event[state + '_classification'], event[state + '_active'],
+                       event['automatic_classification'], event['model_id'], token or uuid.uuid4().hex, head,
+                       json.loads(event['selection_context']) if event.get('selection_context') else None)
             self.bump(con)
         return True
 

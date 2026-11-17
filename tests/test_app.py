@@ -205,11 +205,13 @@ def test_primary_overlay_and_lazy_details_follow_actual_counts(uploads):
         assert len(editors) == 1
         assert 'fiber_editor' in editors[0].proto.component_name
         editor_args = json.loads(editors[0].proto.json_args)
-        assert editor_args['image'].startswith('data:image/png;base64,')
+        assert editor_args['base_image'].startswith('data:image/png;base64,')
         from test_editor import decode_preview
         np.testing.assert_array_equal(decode_preview(editor_args['original_image']), image)
         assert editor_args['original_note'] == ''
-        assert editor_args['labels_image'].startswith('data:image/png;base64,')
+        assert editor_args['label_map'].startswith('data:image/png;base64,')
+        assert [o['fiber_id'] for o in editor_args['objects'] if o['accepted']]==[2]
+        assert [s['fiber_id'] for s in editor_args['id_sprites']]==[2]
         assert [i['fiber_id'] for i in editor_args['fiber_id_labels']]==[2]
         assert editor_args['context'] == app.session_state['review_context']
         details = next(e for e in app.expander if e.label == 'View Detailed Fiber Analysis')
@@ -245,7 +247,10 @@ def test_comparison_original_stays_unchanged_on_review_and_changes_with_upload(u
     original_url = args['original_image']
     widget(app, 'button', 'Mark rejected').click().run(timeout=30)
     rejected = json.loads(app.main.get('component_instance')[0].proto.json_args)
-    assert rejected['image'] != args['image']
+    assert rejected['base_image'] == args['base_image']
+    assert rejected['label_map'] == args['label_map']
+    assert rejected['objects'][0]['accepted'] is False
+    assert args['objects'][0]['accepted'] is True
     assert rejected['original_image'] == original_url
     widget(app, 'button', 'Undo last correction').click().run(timeout=30)
     measurement_columns = ['fiber_id', 'length_um', 'mean_diameter_um', 'diameter_sd_um',
@@ -275,8 +280,17 @@ def test_comparison_remains_available_when_review_storage_is_unwritable(uploads)
     args = json.loads(app.main.get('component_instance')[0].proto.json_args)
     assert args['review_enabled'] is False
     np.testing.assert_array_equal(decode_preview(args['original_image']), image)
-    assert args['image'] and args['labels_image']
+    assert args['base_image'] and args['label_map'] and args['id_sprites']
     assert len(app.dataframe[0].value) == 1
+    old_asset_key=args['asset_key']
+    image[0,0]=1
+    uploads['image']=('another-readonly.tiff',image_bytes(image))
+    with patch('collagen.review_ui.FeedbackStore', side_effect=OSError('Read only')):
+        app.run(timeout=30)
+        submit(app)
+    replacement=json.loads(app.main.get('component_instance')[0].proto.json_args)
+    assert replacement['asset_key']!=old_asset_key
+    np.testing.assert_array_equal(decode_preview(replacement['original_image']),image)
 
 
 def test_manual_buttons_update_csv_counts_restore_on_reopen_and_undo(uploads):
@@ -341,3 +355,53 @@ def test_retrain_without_enough_reviews_explains_requirements(uploads):
     assert not app.exception and not app.error
     assert app.warning, repr(app.session_state)
     assert 'two training images' in app.warning[0].value
+
+
+def test_physical_filters_change_eligibility_without_geometry_or_image_encoding(uploads):
+    from collagen.pipeline import analyze_pixels
+    from collagen.editor import editor_assets
+    image=np.zeros((100,160),np.uint16);image[20:29,20:120]=45000
+    uploads['image']=('filters.tiff',image_bytes(image))
+    with patch('collagen.pipeline.analyze_pixels',wraps=analyze_pixels) as geometry, \
+         patch('collagen.review_ui.editor_assets',wraps=editor_assets) as encoding:
+        app=submit(AppTest.from_file(APP).run(timeout=30),calibration=.01)
+        measurements=app.dataframe[0].value[['fiber_id','length_um','mean_diameter_um','diameter_sd_um','endpoints']].copy()
+        context=app.session_state['review_context']
+        widget(app,'number_input','Minimum reliable mean width (pixels)').set_value(100.)
+        submit(app,calibration=.01)
+        assert app.dataframe[0].value.selection_category.tolist()==['too_small']
+        assert json.loads(app.json[0].value)['accepted_measurement_count']==0
+        assert app.session_state['review_context']!=context
+        widget(app,'button','Mark accepted').click().run(timeout=30)
+        assert app.dataframe[0].value.manual_classification.tolist()==['accepted']
+        assert app.dataframe[0].value.review_status.tolist()==['review_required']
+        assert app.warning and 'still fail measurement eligibility' in app.warning[0].value
+        widget(app,'number_input','Minimum reliable mean width (pixels)').set_value(3.)
+        widget(app,'checkbox','Enable research-interest diameter range').check()
+        submit(app,calibration=.01)
+        assert app.dataframe[0].value.selection_category.tolist()==['accepted']
+        assert app.dataframe[0].value.automatic_category.tolist()==['out_of_range']
+        assert app.dataframe[0].value[measurements.columns].equals(measurements)
+        assert geometry.call_count==encoding.call_count==1
+        args=json.loads(app.main.get('component_instance')[0].proto.json_args)
+        assert args['objects'][0]['accepted'] and args['objects'][0]['manual']=='accepted'
+
+
+def test_browser_asset_acknowledgment_uses_references_and_cache_miss_restores_layers(uploads):
+    image=np.zeros((80,120),np.uint16);image[30:39,15:100]=45000
+    uploads['image']=('assets.tiff',image_bytes(image))
+    app=submit(AppTest.from_file(APP).run(timeout=30))
+    args=json.loads(app.main.get('component_instance')[0].proto.json_args)
+    event=dict(action='reject',token='asset-ack-event',context=args['context'],fiber_id=1,
+               asset_key=args['asset_key'],known_sprites=[args['id_sprites'][0]['sprite_key']])
+    with patch('collagen.review_ui.fiber_editor',return_value=event):app.run(timeout=30)
+    app.run(timeout=30)
+    referenced=json.loads(app.main.get('component_instance')[0].proto.json_args)
+    assert referenced['asset_key']==args['asset_key']
+    assert 'original_image' not in referenced and 'base_image' not in referenced and 'label_map' not in referenced
+    reload=dict(action='request_assets',token='asset-cache-miss',context=referenced['context'])
+    with patch('collagen.review_ui.fiber_editor',return_value=reload):app.run(timeout=30)
+    app.run(timeout=30)
+    restored=json.loads(app.main.get('component_instance')[0].proto.json_args)
+    assert restored['original_image']==args['original_image'] and restored['label_map']==args['label_map']
+    assert restored['objects'][0]['manual']=='rejected'
