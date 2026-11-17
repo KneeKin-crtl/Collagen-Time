@@ -64,6 +64,8 @@ each fiber, with short leaders anchored to that same object. Zoom for crowded ar
 the editor's **Show accepted fiber IDs** checkbox can hide labels for boundary
 inspection without changing decisions or data. Rejected, excluded and accepted-but-
 unmeasurable objects have no ID callout. The detailed annotation follows the same rule.
+Text is sized in original image pixels; use zoom to read IDs on large microscopy
+images. Crowded regions can require longer leader lines or still have overlap.
 
 The four processing stages—original, binary mask, labeled candidates, and detailed
 IDs/centerlines—remain in the collapsed **View Detailed Fiber Analysis** section.

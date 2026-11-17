@@ -62,7 +62,9 @@ def fiber_id_layout(labels, table):
         xx, yy = xx + xs.start, yy + ys.start
         cx,cy = float(xx.mean()),float(yy.mean())
         text = str(fiber_id)  # Never a row index or a newly numbered counter.
-        scale = max(.55, width / 2400)
+        # Use native-image text size. Scaling the font with a 4K image would
+        # cover many fiber boundaries; the editor provides zoom for reading it.
+        scale = .7
         thickness = max(1, int(round(scale)))
         padding = max(1, int(round(scale * 2)))
         for _ in range(60):
@@ -87,18 +89,33 @@ def fiber_id_layout(labels, table):
             for dx,dy in ((1,0),(-1,0),(0,1),(0,-1),(1,1),(-1,1),(1,-1),(-1,-1)):
                 candidates.append((cx+dx*radius*box_width-box_width/2,
                                    cy+dy*radius*box_height-box_height/2))
+        def score_rect(rect):
+            x,y,x1,y1 = rect
+            neighbors = set(r for key in cells(rect) for r in occupied.get(key,()))
+            overlap = sum(_intersection(rect, other) for other in neighbors)
+            foreground_pixels = int(foreground[y1,x1]-foreground[y,x1]
+                                    -foreground[y1,x]+foreground[y,x])
+            distance = np.hypot(x+box_width/2-cx,y+box_height/2-cy)
+            # Prioritize avoiding other IDs, then balance proximity and ink over
+            # foreground. Dense noise must not send every callout to one edge.
+            return overlap, foreground_pixels + distance
+
         best = None
         for x,y in candidates:
             x,y = int(np.clip(round(x),0,width-box_width)),int(np.clip(round(y),0,height-box_height))
             rect = (x,y,x+box_width,y+box_height)
-            neighbors = set(r for key in cells(rect) for r in occupied.get(key,()))
-            overlap = sum(_intersection(rect, other) for other in neighbors)
-            foreground_pixels = int(foreground[rect[3],rect[2]]-foreground[y,rect[2]]
-                                    -foreground[rect[3],x]+foreground[y,x])
-            distance = np.hypot(x+box_width/2-cx,y+box_height/2-cy)
-            score = overlap*100000 + foreground_pixels*1000 + distance
+            score = score_rect(rect)
             if best is None or score < best[0]:
                 best = (score,rect)
+        if best[0][0] > 0:
+            # Only crowded neighborhoods need a broader search. Prefer a longer
+            # leader to an ID completely hidden beneath another label.
+            for y in range(0,height-box_height+1,box_height+2*padding):
+                for x in range(0,width-box_width+1,box_width+2*padding):
+                    rect = (x,y,x+box_width,y+box_height)
+                    score = score_rect(rect)
+                    if score < best[0]:
+                        best = (score,rect)
         rect = best[1]
         # The closest object pixel anchors the callout to the correct fiber,
         # rather than an empty centroid or another nearby object.
