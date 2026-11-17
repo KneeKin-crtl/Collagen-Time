@@ -26,7 +26,8 @@ from playwright.sync_api import sync_playwright
 
 
 def synthetic_png(path):
-    rows = [bytearray(320) for _ in range(200)]
+    # Mid-gray microscopy-like background makes plain black ID glyphs visible.
+    rows = [bytearray([80]*320) for _ in range(200)]
     for y0,y1,x0,x1 in ((30,41,30,140),(70,81,30,140),(110,121,0,140)):
         for y in range(y0,y1):
             rows[y][x0:x1] = bytes([200]) * (x1-x0)

@@ -66,7 +66,7 @@ def reviewed_results(baseline, image_name, source_sha):
         st.rerun()
 
     st.caption(f"Green: {result.summary['accepted_count']} accepted objects · Red: {result.summary['review_required_count']} rejected candidates · Measurable accepted fibers: {result.summary['accepted_measurement_count']}. Accepted objects with unavailable or partial geometry stay out of measurement statistics.")
-    st.caption('White ID callouts label only measurable accepted fibers and match fiber_id in the CSV opened in Excel. Zoom for dense areas, or hide IDs to inspect boundaries. Click the colored fiber itself to change its review decision.')
+    st.caption('Black ID labels identify only measurable accepted fibers and match fiber_id in the CSV opened in Excel. Zoom for dense areas, or hide IDs to inspect boundaries. Click the colored fiber itself to change its review decision.')
     if result.summary['accepted_pending_measurement_count']:
         st.warning('Some accepted objects cannot provide reliable complete measurements. Their original QC flags are retained. Outline a separated individual fiber if appropriate; accepting a merged or truncated object does not reconstruct its missing centerline.')
 

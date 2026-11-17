@@ -33,7 +33,8 @@ restores the original labels. No automatic splitting or edge guessing is done.
 
 ## Counts, measurements and exports
 
-The primary view and detailed annotation show white-on-dark `fiber_id` callouts
+The primary view and detailed annotation show plain black `fiber_id` numbers,
+without a background plate, at a default glyph height of 14 original pixels,
 only for rows included in the measurement count. Match the printed number to the
 `fiber_id` column of the CSV opened in Excel, not the spreadsheet row number.
 Rejected objects and green objects pending reliable measurements have no callout.

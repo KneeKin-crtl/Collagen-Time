@@ -12,7 +12,7 @@ Collagen Fiber Analyzer - Windows 10/11 x64
 7. Press Analyze image. Click a highlighted object to toggle accepted (green) /
    rejected (red); zoom in for small objects and use Undo for mistakes.
    Green counts accepted objects; only measurable accepted fibers enter measurement
-   statistics. Only those measurable fibers show white-on-dark ID callouts matching
+   statistics. Only those measurable fibers show black ID numbers without a background, matching
    fiber_id in the CSV opened in Excel. Zoom for dense labels, or uncheck Show
    accepted fiber IDs to inspect boundaries without changing data.
    Ambiguous geometry remains flagged. Open View Detailed

@@ -3,6 +3,7 @@ import json
 from unittest.mock import patch
 import zipfile
 
+import cv2
 import numpy as np
 import pandas as pd
 import pytest
@@ -17,10 +18,10 @@ from collagen.visualization import count_overlay
 
 
 def review_fixture(tmp_path):
-    image=np.zeros((160,260),np.uint16)
-    image[30:39,30:140]=45000
-    image[70:79,30:140]=45000
-    image[110:119,:140]=45000  # Partial border object: green after override, never labeled.
+    image=np.full((160,260),80,np.uint8)
+    image[30:39,30:140]=200
+    image[70:79,30:140]=200
+    image[110:119,:140]=200  # Partial border object: green after override, never labeled.
     baseline=analyze(image,.25,'original.tiff')
     store=FeedbackStore(tmp_path/'review')
     return ReviewSession(baseline,store,'original.tiff')
@@ -60,7 +61,10 @@ def test_labels_avoid_overlap_and_foreground_when_space_is_available():
     for i,item in enumerate(layout):
         x0,y0,x1,y1=item['box_xyxy']
         assert not labels[y0:y1,x0:x1].any()
-        assert np.any(layer[y0:y1,x0:x1,:3]>200)  # Visible white glyph pixels.
+        assert layer[y0:y1,x0:x1,3].any()  # Glyph ink is present.
+        assert not layer[y0:y1,x0:x1,:3].any()  # Plain black text.
+        assert np.any(layer[y0:y1,x0:x1,3]==0)  # No filled background plate.
+        assert cv2.getTextSize(item['text'],cv2.FONT_HERSHEY_SIMPLEX,item['font_scale'],1)[0][1]==14
         for other in layout[i+1:]:
             a,b,c,d=other['box_xyxy']
             assert max(0,min(x1,c)-max(x0,a))*max(0,min(y1,d)-max(y0,b))==0

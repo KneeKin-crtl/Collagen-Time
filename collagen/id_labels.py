@@ -64,7 +64,7 @@ def fiber_id_layout(labels, table):
         text = str(fiber_id)  # Never a row index or a newly numbered counter.
         # Use native-image text size. Scaling the font with a 4K image would
         # cover many fiber boundaries; the editor provides zoom for reading it.
-        scale = .7
+        scale = .6  # 14-pixel glyph height, reduced from 16 pixels.
         thickness = max(1, int(round(scale)))
         padding = max(1, int(round(scale * 2)))
         for _ in range(60):
@@ -141,16 +141,13 @@ def fiber_id_layer(labels, layout):
     layer = np.zeros(labels.shape + (4,),np.uint8)
     for item in layout:
         start,anchor = tuple(item['leader_start_xy']),tuple(item['anchor_xy'])
-        cv2.line(layer,start,anchor,(0,0,0,255),3,cv2.LINE_AA)
-        cv2.line(layer,start,anchor,(255,255,255,255),1,cv2.LINE_AA)
+        cv2.line(layer,start,anchor,(0,0,0,255),1,cv2.LINE_AA)
     # Leaders never paint fiber interiors or boundaries. Text placement prefers
     # background too; the editor can hide the entire layer for inspection.
     layer[labels != 0] = 0
     for item in layout:
-        x0,y0,x1,y1 = item['box_xyxy']
-        cv2.rectangle(layer,(x0,y0),(x1-1,y1-1),(0,0,0,230),-1)
         cv2.putText(layer,item['text'],tuple(item['text_xy']),FONT,
-                    item['font_scale'],(255,255,255,255),item['font_thickness'],cv2.LINE_AA)
+                    item['font_scale'],(0,0,0,255),item['font_thickness'],cv2.LINE_AA)
     return layer
 
 

@@ -58,7 +58,7 @@ clicks do not snap to nearby objects. Green does not guarantee measurable geomet
 accepted objects with unavailable or partial measurements are reported separately
 and excluded from measurement aggregates. See [manual review and learning](docs/feedback-learning.md).
 
-White-on-dark ID callouts label **only measurable accepted fibers**, using the
+Plain black ID labels with no background label **only measurable accepted fibers**, using the
 exact `fiber_id` exported in the Excel-readable CSV. Labels prefer background beside
 each fiber, with short leaders anchored to that same object. Zoom for crowded areas;
 the editor's **Show accepted fiber IDs** checkbox can hide labels for boundary
@@ -66,6 +66,7 @@ inspection without changing decisions or data. Rejected, excluded and accepted-b
 unmeasurable objects have no ID callout. The detailed annotation follows the same rule.
 Text is sized in original image pixels; use zoom to read IDs on large microscopy
 images. Crowded regions can require longer leader lines or still have overlap.
+The default glyph height is 14 pixels, reduced from the earlier 16-pixel style.
 
 The four processing stages—original, binary mask, labeled candidates, and detailed
 IDs/centerlines—remain in the collapsed **View Detailed Fiber Analysis** section.
