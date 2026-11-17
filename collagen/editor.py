@@ -97,11 +97,18 @@ def editor_objects(table):
         # A superseded object has no editable visible mask. Remaining hard gates
         # cannot be waived by a color change; the explicit human label is saved.
         finite=np.isfinite([row.get('length_um',np.nan),row.get('mean_diameter_um',np.nan)]).all()
+        saved_event=row.get('last_correction_id')
+        try:
+            saved_event=int(saved_event) if saved_event is not None and np.isfinite(saved_event) else 0
+        except (TypeError,ValueError):
+            saved_event=0
         objects.append(dict(fiber_id=int(row['fiber_id']), accepted=row['review_status']=='accepted',
                             measurable=bool(finite and not hard),
                             category=category, automatic_category=automatic,
                             manual=manual if isinstance(manual,str) else None,
+                            saved_event=saved_event,
                             can_accept=not hard,
+                            automatic_reason=row.get('automatic_exclusion_reason',row.get('qc_flags','')),
                             reason=row.get('exclusion_reason',row.get('qc_flags','')),
                             needs_review=bool(row.get('requires_manual_review',row['review_status']!='accepted'))))
     return objects

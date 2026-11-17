@@ -5,7 +5,7 @@ import pytest
 from types import SimpleNamespace
 import pandas as pd
 
-from collagen.editor import original_preview, editor_assets, label_sprite
+from collagen.editor import original_preview, editor_assets, label_sprite, editor_objects
 from collagen.loading import load_image
 from collagen.id_labels import fiber_id_layout
 
@@ -39,6 +39,13 @@ def test_float_tiff_preview_explicitly_reports_browser_conversion_without_mutati
     assert 'Browser display conversion' in note
     assert decode_preview(url).shape[:2] == image.shape
     np.testing.assert_array_equal(image, before)
+
+
+@pytest.mark.parametrize('saved_event', [None, np.nan, pd.NA])
+def test_unreviewed_editor_records_have_a_json_safe_confirmation_marker(saved_event):
+    table=pd.DataFrame([dict(fiber_id=1855,review_status='accepted',last_correction_id=saved_event,
+                             length_um=50.,mean_diameter_um=3.)])
+    assert editor_objects(table)[0]['saved_event']==0
 
 
 def test_identity_layer_round_trips_ids_above_single_byte_without_touching_source():

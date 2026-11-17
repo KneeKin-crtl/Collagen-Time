@@ -11,18 +11,19 @@ import tifffile
 from collagen.export import result_archive, csv_bytes
 from collagen.feedback import FeedbackStore, image_identity, unpack_mask
 from collagen.geometry import measure
+from collagen.editor import editor_objects
 from collagen.pipeline import analyze
 from collagen.review import ReviewSession, polygon_mask
 from collagen.visualization import count_overlay
 
 
-def session(tmp_path, image=None, **kwargs):
+def session(tmp_path, image=None, render=True, **kwargs):
     if image is None:
         image = np.zeros((100,160), np.uint16)
         image[20:29,20:120] = 40000
         image[40:49,20:120] = 40000
     return ReviewSession(analyze(image, .5, 'original.tiff', **kwargs),
-                         FeedbackStore(tmp_path / 'db'), 'original.tiff', 'upload-hash')
+                         FeedbackStore(tmp_path / 'db'), 'original.tiff', 'upload-hash', render=render)
 
 
 def event(review, x, y, **kwargs):
@@ -53,6 +54,32 @@ def test_exact_click_updates_one_object_measurements_and_exports(tmp_path):
         assert np.array_equal(tifffile.imread(BytesIO(z.read('original.tiff'))),r.baseline.original)
         assert np.array_equal(tifffile.imread(BytesIO(z.read('baseline_labels.tiff'))),r.baseline.labels)
         assert tuple(tifffile.imread(BytesIO(z.read('count_overlay.tiff')))[24,25]) != (0,255,0)
+
+
+def test_editor_confirmation_tracks_saved_decisions_without_changing_geometry(tmp_path):
+    r=session(tmp_path,render=False)
+    before=r.result.table[['fiber_id','length_um','mean_diameter_um','diameter_sd_um']].copy()
+    initial=editor_objects(r.result.table)
+    assert [o['saved_event'] for o in initial]==[0,0]
+    versions=[]
+    for decision in ('rejected','accepted','accepted'):
+        r.correct(1,decision,'training');r.refresh()
+        metadata=editor_objects(r.result.table)
+        assert metadata[0]['accepted']==(decision=='accepted')
+        assert metadata[0]['saved_event']>0
+        assert metadata[1]==initial[1], 'An unrelated object must not change.'
+        versions.append(metadata[0]['saved_event'])
+        pd.testing.assert_frame_equal(r.result.table[before.columns],before)
+    assert versions==sorted(set(versions)), 'Each saved event must invalidate its displayed object, even for the same decision.'
+    reopened=session(tmp_path,render=False)
+    assert editor_objects(reopened.result.table)==metadata
+    r.store.undo(r.analysis_key);r.refresh()
+    undone=editor_objects(r.result.table)[0]
+    assert undone['accepted'] and undone['saved_event']>versions[-1]
+    r.store.redo(r.analysis_key);r.refresh()
+    redone=editor_objects(r.result.table)[0]
+    assert redone['accepted'] and redone['saved_event']>undone['saved_event']
+    pd.testing.assert_frame_equal(r.result.table[before.columns],before)
 
 
 def test_persistence_undo_calibration_and_filename_identity(tmp_path):

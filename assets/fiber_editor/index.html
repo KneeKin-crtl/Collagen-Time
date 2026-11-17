@@ -32,8 +32,8 @@ input{vertical-align:middle}
  <button id="outline" aria-pressed="false">Outline missed / merged fiber</button>
  <button id="save" disabled>Save outline</button>
  <button id="clear">Clear outline</button>
- <button id="accept">Accept selected (A)</button>
- <button id="reject">Reject selected (R)</button>
+ <button id="accept" aria-label="Accept selected (A)">Accept selected (A)</button>
+ <button id="reject" aria-label="Reject selected (R)">Reject selected (R)</button>
  <button id="next">Next unreviewed (N)</button>
  <button id="undo">Undo</button>
  <button id="redo">Redo</button>
@@ -43,6 +43,8 @@ input{vertical-align:middle}
  <label><input id="showIds" type="checkbox" checked> Show accepted fiber IDs</label>
  <label>Zoom <input aria-label="Zoom" id="zoom" type="range" min="50" max="800" value="100" step="25"> <span id="zoomLabel">100%</span></label>
 </div>
+<div id="selected" aria-live="polite">Select a colored object to inspect its category.</div>
+<div id="status" role="status">Left-click to accept, right-click to reject. Wait for all corrections to be saved before exporting or closing.</div>
 <div class="results-grid" aria-label="Microscope image comparison">
  <section aria-labelledby="original-title">
   <h3 id="original-title">Original Microscope Image</h3>
@@ -55,8 +57,6 @@ input{vertical-align:middle}
  </section>
 </div>
 <div id="review-progress" aria-live="polite"></div>
-<div id="selected">Select a colored object to inspect its category.</div>
-<div id="status" role="status">Left-click to accept, right-click to reject. Wait for all corrections to be saved before exporting or closing.</div>
 <div><span class="green">Green: accepted</span> · <span class="red">Red: excluded or manually rejected</span> · Measurements unavailable for ambiguous geometry remain flagged.</div>
 <script src="editor.js"></script>
 </body>
