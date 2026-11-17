@@ -27,7 +27,8 @@ from playwright.sync_api import sync_playwright
 
 def synthetic_png(path):
     # Mid-gray microscopy-like background makes plain black ID glyphs visible.
-    rows = [bytearray([80]*320) for _ in range(200)]
+    # Larger than either result column: exercise fit-to-width and source mapping.
+    rows = [bytearray([80]*1280) for _ in range(800)]
     for y0,y1,x0,x1 in ((30,41,30,140),(70,81,30,140),(110,121,0,140)):
         for y in range(y0,y1):
             rows[y][x0:x1] = bytes([200]) * (x1-x0)
@@ -35,7 +36,7 @@ def synthetic_png(path):
         return struct.pack('!I',len(data)) + kind + data + struct.pack('!I',zlib.crc32(kind+data))
     raw = b''.join(b'\x00' + row for row in rows)
     path.write_bytes(b'\x89PNG\r\n\x1a\n'
-                     + chunk(b'IHDR',struct.pack('!IIBBBBB',320,200,8,0,0,0,0))
+                     + chunk(b'IHDR',struct.pack('!IIBBBBB',1280,800,8,0,0,0,0))
                      + chunk(b'IDAT',zlib.compress(raw)) + chunk(b'IEND',b''))
 
 
@@ -58,9 +59,39 @@ def interactions(browser, url, root, output):
         page.get_by_text('Bright fibers on dark background',exact=True).click()
         page.get_by_role('button',name='Analyze image',exact=True).click()
         editor().locator('#image').wait_for(state='visible',timeout=30000)
+        editor().locator('#original-image').wait_for(state='visible',timeout=30000)
     def color(x,y):
         return editor().locator('#image').evaluate(
             '(c,p)=>Array.from(c.getContext("2d").getImageData(p[0],p[1],1,1).data)',[x,y])[:3]
+    def original_pixels():
+        return editor().locator('#original-image').evaluate('(c)=>c.toDataURL()')
+    def assert_comparison(stacked=False):
+        editor().get_by_role('heading',name='Original Microscope Image',exact=True).wait_for(state='visible')
+        editor().get_by_role('heading',name='AI Fiber Analysis',exact=True).wait_for(state='visible')
+        original = editor().locator('#original-image')
+        analyzed = editor().locator('#image')
+        # Wait for iframe resizing (including Streamlit's sidebar animation),
+        # sampling both rectangles atomically rather than across resize events.
+        deadline=time.monotonic()+10
+        while True:
+            layout=editor().locator('.results-grid').evaluate('''async g=>{
+                await new Promise(requestAnimationFrame);
+                const rect=id=>document.getElementById(id).getBoundingClientRect().toJSON();
+                return {left:rect('original-viewport'),right:rect('viewport'),
+                        original:rect('original-image'),analysis:rect('image')};
+            }''')
+            left,right=layout['left'],layout['right']
+            equal=all(abs(layout['original'][axis]-layout['analysis'][axis])<1 for axis in ('width','height'))
+            positioned=(left['y']+left['height']<right['y'] and abs(left['x']-right['x'])<1 if stacked
+                        else left['x']+left['width']<right['x'] and abs(left['y']-right['y'])<1)
+            if equal and positioned:
+                break
+            if time.monotonic()>deadline:
+                raise AssertionError(layout)
+            time.sleep(.1)
+        assert original.evaluate('(c)=>[c.width,c.height]') == analyzed.evaluate('(c)=>[c.width,c.height]') == [1280,800]
+        assert original.evaluate('(c)=>Array.from(c.getContext("2d").getImageData(50,35,1,1).data)') == [200,200,200,255]
+        assert original.evaluate('(c)=>Array.from(c.getContext("2d").getImageData(500,500,1,1).data)') == [80,80,80,255]
     def id_labels():
         return json.loads(editor().locator('#image').get_attribute('data-id-labels'))
     def assert_ids(expected):
@@ -85,7 +116,8 @@ def interactions(browser, url, root, output):
             v.scrollTop=Math.max(0,p[1]*s-v.clientHeight/2);
         }''',[x,y])
         box = canvas.bounding_box()
-        page.mouse.click(box['x']+x*box['width']/320,box['y']+y*box['height']/200)
+        width,height = canvas.evaluate('(c)=>[c.width,c.height]')
+        page.mouse.click(box['x']+x*box['width']/width,box['y']+y*box['height']/height)
     def states():
         with closing(sqlite3.connect(root/'data'/'feedback.sqlite3')) as con:
             return con.execute('SELECT fiber_id,manual_classification,active FROM objects ORDER BY fiber_id').fetchall()
@@ -94,6 +126,23 @@ def interactions(browser, url, root, output):
     wait_color(50,35,True)
     wait_color(50,75,True)
     assert_ids([1,2])  # Excluded border object 3 never gets an ID.
+    assert_comparison()
+    original_before = original_pixels()
+    editor().locator('.results-grid').screenshot(path=str(output/'comparison-wide.png'))
+    # Original-side clicks must not create corrections or change the overlay.
+    before_states=states()
+    editor().locator('#original-image').click(position={'x':20,'y':20})
+    assert states()==before_states
+    page.set_viewport_size({'width':600,'height':1000})
+    # The component's media query responds to available frontend width.
+    editor().locator('.results-grid').evaluate('(g)=>getComputedStyle(g).gridTemplateColumns')
+    editor().locator('#image').scroll_into_view_if_needed()
+    assert_comparison(stacked=True)
+    editor().locator('.results-grid').screenshot(path=str(output/'comparison-narrow.png'))
+    page.set_viewport_size({'width':1500,'height':1100})
+    editor().locator('#image').scroll_into_view_if_needed()
+    assert_comparison()
+    print('Original and analysis visible at matching scale; responsive stacking passed',flush=True)
     before_states=states()
     with_ids=editor().locator('#image').evaluate('(c)=>c.toDataURL()')
     editor().get_by_role('checkbox',name='Show accepted fiber IDs',exact=True).uncheck()
@@ -104,15 +153,25 @@ def interactions(browser, url, root, output):
     assert editor().locator('#image').evaluate('(c)=>c.toDataURL()')==with_ids
     click(50,35)
     wait_color(50,35,False)
+    assert original_pixels()==original_before, 'Review changed the original image.'
     assert_ids([2])
     assert color(50,75)[1] > color(50,75)[0], 'A neighboring object changed.'
     print('Exact click changed one object only',flush=True)
     editor().locator('#zoom').fill('400')
+    assert_comparison()
+    for source,target in (('#viewport','#original-viewport'),('#original-viewport','#viewport')):
+        editor().locator(source).evaluate('(v)=>{v.scrollLeft=100;v.scrollTop=80;}')
+        page.wait_for_function('''()=>{
+            const f=document.querySelector('iframe[title*="fiber_editor"]');
+            const d=f.contentDocument,a=d.getElementById('viewport'),b=d.getElementById('original-viewport');
+            return a.scrollLeft===b.scrollLeft && a.scrollTop===b.scrollTop;
+        }''')
     click(50,35)
     wait_color(50,35,True)
     assert_ids([1,2])
     click(50,35)
     wait_color(50,35,False)
+    assert original_pixels()==original_before
     print('Zoomed click mapping passed',flush=True)
     editor().locator('#zoom').fill('100')
     editor().get_by_role('button',name='Outline missed / merged fiber',exact=True).click()
@@ -148,6 +207,8 @@ def interactions(browser, url, root, output):
     wait_color(50,35,False)
     wait_color(240,125,True)
     assert id_labels()==before_labels
+    assert_comparison()
+    assert original_pixels()==original_before
     editor().get_by_role('button',name='Undo',exact=True).click()
     deadline = time.monotonic() + 20
     while time.monotonic()<deadline and (4,'accepted',1) in states():
@@ -168,6 +229,8 @@ def interactions(browser, url, root, output):
                   restored_after_reopen=True,persistent_undo=True,insufficient_data_notice=True,
                   measured_id_labels=True,label_visibility_updates=True,label_toggle_is_display_only=True,
                   label_manifest_matches_csv=True,
+                  original_and_analysis_side_by_side=True,matching_scale_and_aspect_ratio=True,
+                  responsive_stacking=True,original_unchanged_by_review=True,synchronized_zoom_and_scroll=True,
                   browser_errors=errors)
     (output/'report.json').write_text(json.dumps(report,indent=2),encoding='utf-8')
     print('Browser interaction checks passed',flush=True)

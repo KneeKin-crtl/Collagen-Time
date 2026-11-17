@@ -50,7 +50,14 @@ Skeleton edges use weights 1 for horizontal/vertical movement and sqrt(2) for di
 
 Width is **twice the Euclidean distance to background at centerline pixels**, an approximation to manual perpendicular edge-to-edge diameter. Endpoint/junction neighborhoods are excluded using the larger of the configured radius and local distance-transform radius. Mean and population SD describe retained width samples, not uncertainty or between-fiber variability. Digital boundaries, skeleton bias, focus, stain, threshold choice, and curvature affect estimates. Length is between skeleton endpoints and does not include inferred end-cap extensions. Digital arc lengths have orientation-dependent bias.
 
-The primary view is an interactive, full-resolution overlay on the original:
+The results show **Original Microscope Image** on the left and **AI Fiber Analysis**
+on the right, with matching scale and aspect ratio. Narrow screens stack the views.
+Zoom and scrolling are shared so the same region stays aligned; only the analysis
+view accepts review clicks. The original preview retains decoded uint8/uint16 pixels
+without annotations, resizing or contrast changes. Other TIFF pixel types require
+a labeled browser display conversion; the original analysis/download pixels remain intact.
+
+The analysis view is an interactive, full-resolution overlay on the original:
 **green** marks accepted objects and **red** marks rejected candidates. Click an
 object to toggle it, zoom in for precision, and use Undo to reverse a correction.
 Colors follow the final API decision, including manual overrides. Background

@@ -206,6 +206,9 @@ def test_primary_overlay_and_lazy_details_follow_actual_counts(uploads):
         assert 'fiber_editor' in editors[0].proto.component_name
         editor_args = json.loads(editors[0].proto.json_args)
         assert editor_args['image'].startswith('data:image/png;base64,')
+        from test_editor import decode_preview
+        np.testing.assert_array_equal(decode_preview(editor_args['original_image']), image)
+        assert editor_args['original_note'] == ''
         assert editor_args['labels_image'].startswith('data:image/png;base64,')
         assert [i['fiber_id'] for i in editor_args['fiber_id_labels']]==[2]
         assert editor_args['context'] == app.session_state['review_context']
@@ -229,6 +232,51 @@ def test_primary_overlay_and_lazy_details_follow_actual_counts(uploads):
         assert len(app.main.get('image')) == 0
         assert len(app.main.get('component_instance')) == 1
         assert geometry.call_count == 1
+
+
+def test_comparison_original_stays_unchanged_on_review_and_changes_with_upload(uploads):
+    from test_editor import decode_preview
+    image = np.full((80, 120), 2000, np.uint16)
+    image[30:39, 15:100] = 45000
+    uploads['image'] = ('first.tiff', image_bytes(image))
+    app = submit(AppTest.from_file(APP).run(timeout=30))
+    before = app.dataframe[0].value.copy(deep=True)
+    args = json.loads(app.main.get('component_instance')[0].proto.json_args)
+    original_url = args['original_image']
+    widget(app, 'button', 'Mark rejected').click().run(timeout=30)
+    rejected = json.loads(app.main.get('component_instance')[0].proto.json_args)
+    assert rejected['image'] != args['image']
+    assert rejected['original_image'] == original_url
+    widget(app, 'button', 'Undo last correction').click().run(timeout=30)
+    measurement_columns = ['fiber_id', 'length_um', 'mean_diameter_um', 'diameter_sd_um',
+                           'included_in_measurement_statistics']
+    assert app.dataframe[0].value[measurement_columns].equals(before[measurement_columns])
+    assert json.loads(app.main.get('component_instance')[0].proto.json_args)['original_image'] == original_url
+    # A different source of the same dimensions must never retain the old preview.
+    image[0, 0] = 1234
+    uploads['image'] = ('second.tiff', image_bytes(image))
+    app.run(timeout=30)
+    submit(app)
+    assert not app.exception and not app.error
+    replacement = json.loads(app.main.get('component_instance')[0].proto.json_args)
+    assert replacement['original_image'] != original_url
+    np.testing.assert_array_equal(decode_preview(replacement['original_image']), image)
+
+
+def test_comparison_remains_available_when_review_storage_is_unwritable(uploads):
+    from test_editor import decode_preview
+    image = np.zeros((80, 120), np.uint16)
+    image[30:39, 15:100] = 45000
+    uploads['image'] = ('readonly.tiff', image_bytes(image))
+    with patch('collagen.review_ui.FeedbackStore', side_effect=OSError('Read only')):
+        app = submit(AppTest.from_file(APP).run(timeout=30))
+    assert not app.exception
+    assert 'Manual review storage is unavailable' in app.error[0].value
+    args = json.loads(app.main.get('component_instance')[0].proto.json_args)
+    assert args['review_enabled'] is False
+    np.testing.assert_array_equal(decode_preview(args['original_image']), image)
+    assert args['image'] and args['labels_image']
+    assert len(app.dataframe[0].value) == 1
 
 
 def test_manual_buttons_update_csv_counts_restore_on_reopen_and_undo(uploads):
