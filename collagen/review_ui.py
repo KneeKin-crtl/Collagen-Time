@@ -4,13 +4,22 @@ import sqlite3
 import pandas as pd
 import streamlit as st
 
-from .editor import fiber_editor, image_url
+from .editor import fiber_editor, image_url, original_preview
 from .export import csv_bytes
 from .feedback import FeedbackStore
 from .learning import retrain
 from .review import ReviewSession
 from .visualization import count_overlay
-from .id_labels import fiber_id_layer, composite_id_layer
+from .id_labels import fiber_id_layer
+
+
+def comparison_editor(result, **kwargs):
+    """Keep both views tied to the exact source used by this analysis."""
+    original_image, original_note = original_preview(result.original)
+    return fiber_editor(original_image=original_image, original_note=original_note,
+                        image=image_url(count_overlay(result.original, result.labels, result.table)),
+                        labels_image=image_url(fiber_id_layer(result.labels, result.id_labels)),
+                        fiber_id_labels=result.id_labels, **kwargs)
 
 
 def reviewed_results(baseline, image_name, source_sha):
@@ -20,9 +29,8 @@ def reviewed_results(baseline, image_name, source_sha):
     except (OSError, sqlite3.Error, ValueError) as error:
         st.error(f'Manual review storage is unavailable: {error}. Baseline analysis remains available. Set COLLAGEN_FEEDBACK_DIR to a writable folder to enable saved review.')
         st.json(baseline.summary)
-        st.image(composite_id_layer(count_overlay(baseline.original,baseline.labels,baseline.table),
-                                   fiber_id_layer(baseline.labels,baseline.id_labels)),
-                 caption='Baseline results with measured accepted fiber IDs; manual review unavailable.')
+        comparison_editor(baseline, review_enabled=False, key='baseline-comparison', default=None,
+                          message='Baseline results; saved manual review is unavailable.')
         return baseline
 
     key = review.analysis_key
@@ -44,10 +52,7 @@ def reviewed_results(baseline, image_name, source_sha):
         getattr(st, notice['level'])(notice['text'])
     model_name = review.model['model_id'][:12] if review.model else 'baseline rules'
     st.caption(f'Object classifier: {model_name}. Click an object to toggle acceptance; background clicks do not select a neighboring object. Use the outline tool to add a missed fiber or isolate one from a rejected merged object.')
-    event = fiber_editor(image=image_url(count_overlay(result.original, result.labels, result.table)),
-                         labels_image=image_url(fiber_id_layer(result.labels,result.id_labels)),
-                         fiber_id_labels=result.id_labels,
-                         context=review.context, ack_token=st.session_state.get(ack_key),
+    event = comparison_editor(result, context=review.context, ack_token=st.session_state.get(ack_key),
                          event_ok=notice.get('level') == 'success', message=notice.get('text', ''),
                          key='fiber-editor-' + key, default=None)
     if event is not None and not isinstance(event, dict):

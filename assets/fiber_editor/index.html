@@ -10,7 +10,13 @@ body{font:14px system-ui,sans-serif;color:var(--text);background:var(--backgroun
 button{border:1px solid #777;border-radius:5px;padding:7px 10px;background:var(--surface);color:var(--text);cursor:pointer}
 button[aria-pressed="true"]{border:2px solid #48dc86;padding:6px 9px}
 button:disabled{opacity:.45;cursor:wait}
-#viewport{overflow:auto;width:100%;max-height:600px;border:1px solid #777;border-radius:5px;background:#121212}
+.results-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:16px}
+.results-grid section{min-width:0}
+h3{font-size:17px;margin:10px 0}
+.viewport{box-sizing:border-box;overflow:auto;width:100%;max-height:600px;border:1px solid #777;border-radius:5px;background:#121212}
+#original-image{cursor:default}
+#original-note{margin:5px 0;font-size:12px}
+@media(max-width:760px){.results-grid{grid-template-columns:minmax(0,1fr)}}
 canvas{display:block;cursor:crosshair;touch-action:pan-x pan-y}
 #status{min-height:20px;padding:5px 0}
 .green{color:#63f78a}.red{color:#ff7979}
@@ -27,26 +33,41 @@ input{vertical-align:middle}
  <label><input id="showIds" type="checkbox" checked> Show accepted fiber IDs</label>
  <label>Zoom <input aria-label="Zoom" id="zoom" type="range" min="50" max="800" value="100" step="25"> <span id="zoomLabel">100%</span></label>
 </div>
-<div id="viewport"><canvas id="image" aria-label="Interactive fiber classification image" tabindex="0"></canvas></div>
+<div class="results-grid" aria-label="Microscope image comparison">
+ <section aria-labelledby="original-title">
+  <h3 id="original-title">Original Microscope Image</h3>
+  <div id="original-viewport" class="viewport"><canvas id="original-image" aria-label="Original Microscope Image"></canvas></div>
+  <p id="original-note" hidden></p>
+ </section>
+ <section aria-labelledby="analysis-title">
+  <h3 id="analysis-title">AI Fiber Analysis</h3>
+  <div id="viewport" class="viewport"><canvas id="image" aria-label="Interactive fiber classification image" tabindex="0"></canvas></div>
+ </section>
+</div>
 <div id="status" role="status">Click a highlighted object to change only that object. Zoom in for small objects.</div>
 <div><span class="green">Green: accepted</span> · <span class="red">Red: rejected</span> · Measurements unavailable for ambiguous geometry remain flagged.</div>
 <script>
 'use strict';
 const canvas=document.getElementById('image'), ctx=canvas.getContext('2d');
 const viewport=document.getElementById('viewport'), zoom=document.getElementById('zoom');
-let args=null, image=null, labelImage=null, mode='toggle', points=[], busy=false, lastSent=null, renderId=0, fit=1;
+const originalCanvas=document.getElementById('original-image'), originalCtx=originalCanvas.getContext('2d');
+const originalViewport=document.getElementById('original-viewport');
+let args=null, image=null, originalImage=null, labelImage=null, mode='toggle', points=[], busy=false, lastSent=null, renderId=0, fit=1;
 let origin='*', down=null;
 function post(type, extra) {
   window.parent.postMessage(Object.assign({isStreamlitMessage:true,type:type},extra||{}),origin);
 }
 function height() { post('streamlit:setFrameHeight',{height:document.body.scrollHeight+6}); }
 function controls() {
-  for(const id of ['toggle','outline','clear','undo']) document.getElementById(id).disabled=busy;
-  document.getElementById('save').disabled=busy || mode!=='outline' || points.length<3;
+  const disabled=busy || (args && args.review_enabled===false);
+  for(const id of ['toggle','outline','clear','undo']) document.getElementById(id).disabled=disabled;
+  document.getElementById('save').disabled=disabled || mode!=='outline' || points.length<3;
 }
 function status(text) { document.getElementById('status').textContent=text; }
 function draw() {
-  if(!image)return;
+  if(!image || !originalImage)return;
+  originalCtx.clearRect(0,0,originalCanvas.width,originalCanvas.height);
+  originalCtx.drawImage(originalImage,0,0);
   ctx.clearRect(0,0,canvas.width,canvas.height);
   ctx.drawImage(image,0,0);
   canvas.dataset.idsVisible=String(document.getElementById('showIds').checked);
@@ -64,18 +85,27 @@ function resize() {
   const oldScale=parseFloat(canvas.style.width)/canvas.width || fit;
   const cx=(viewport.scrollLeft+viewport.clientWidth/2)/oldScale;
   const cy=(viewport.scrollTop+viewport.clientHeight/2)/oldScale;
-  fit=Math.min(1,Math.max(1,viewport.clientWidth-2)/image.width);
+  fit=Math.min(1,Math.max(1,Math.min(viewport.clientWidth,originalViewport.clientWidth)-2)/image.width);
   const scale=fit*Number(zoom.value)/100;
-  canvas.style.width=image.width*scale+'px';
-  canvas.style.height=image.height*scale+'px';
-  viewport.style.height=Math.min(600,image.height*fit+2)+'px';
+  for(const c of [canvas,originalCanvas]){
+    c.style.width=image.width*scale+'px';
+    c.style.height=image.height*scale+'px';
+  }
+  for(const v of [viewport,originalViewport])v.style.height=Math.min(600,image.height*fit+2)+'px';
   viewport.scrollLeft=Math.max(0,cx*scale-viewport.clientWidth/2);
   viewport.scrollTop=Math.max(0,cy*scale-viewport.clientHeight/2);
+  syncScroll(viewport,originalViewport);
   document.getElementById('zoomLabel').textContent=zoom.value+'%';
   draw();height();
 }
+function syncScroll(source,target){
+  if(Math.abs(source.scrollLeft-target.scrollLeft)>.5)target.scrollLeft=source.scrollLeft;
+  if(Math.abs(source.scrollTop-target.scrollTop)>.5)target.scrollTop=source.scrollTop;
+}
+viewport.onscroll=function(){syncScroll(viewport,originalViewport);};
+originalViewport.onscroll=function(){syncScroll(originalViewport,viewport);};
 function send(action, extra) {
-  if(busy || !args)return;
+  if(busy || !args || args.review_enabled===false)return;
   busy=true;
   const token=window.crypto.randomUUID ? window.crypto.randomUUID() : Date.now()+'-'+Math.random();
   lastSent=Object.assign({action:action,token:token,context:args.context},extra||{});
@@ -83,7 +113,7 @@ function send(action, extra) {
   post('streamlit:setComponentValue',{value:lastSent,dataType:'json'});
 }
 function setMode(value) {
-  if(busy)return;
+  if(busy || args.review_enabled===false)return;
   mode=value;
   document.getElementById('toggle').setAttribute('aria-pressed',String(mode==='toggle'));
   document.getElementById('outline').setAttribute('aria-pressed',String(mode==='outline'));
@@ -99,7 +129,7 @@ zoom.oninput=resize;
 document.getElementById('showIds').onchange=draw;
 canvas.onpointerdown=function(e){down={x:e.clientX,y:e.clientY};};
 canvas.onpointerup=function(e) {
-  if(busy || !args || !down || Math.hypot(e.clientX-down.x,e.clientY-down.y)>5)return;
+  if(busy || !args || args.review_enabled===false || !down || Math.hypot(e.clientX-down.x,e.clientY-down.y)>5)return;
   down=null;
   const r=canvas.getBoundingClientRect();
   const x=(e.clientX-r.left)*canvas.width/r.width, y=(e.clientY-r.top)*canvas.height/r.height;
@@ -110,7 +140,7 @@ canvas.onpointerup=function(e) {
   } else send('toggle',{x:x,y:y});
 };
 canvas.onkeydown=function(e){
-  if(e.key==='Backspace' && mode==='outline' && !busy){e.preventDefault();points.pop();controls();draw();}
+  if(e.key==='Backspace' && mode==='outline' && !busy && args.review_enabled!==false){e.preventDefault();points.pop();controls();draw();}
   if((e.ctrlKey||e.metaKey) && e.key==='z'){e.preventDefault();send('undo');}
 };
 window.addEventListener('message',function(event){
@@ -130,14 +160,18 @@ window.addEventListener('message',function(event){
   }
   if(!busy)status(args.message || (mode==='outline' ? 'Trace one fiber boundary, then Save outline.' : 'Click a highlighted object to toggle its classification. Zoom in for small objects.'));
   controls();
-  const id=++renderId, renderedArgs=args, nextImage=new Image(), nextLabels=new Image();
+  const id=++renderId, renderedArgs=args, nextImage=new Image(), nextOriginal=new Image(), nextLabels=new Image();
   busy=true;controls();
-  let imageReady=false, labelsReady=!renderedArgs.labels_image;
+  let imageReady=false, originalReady=false, labelsReady=!renderedArgs.labels_image;
   function commitImages(){
-    if(id!==renderId || !imageReady || !labelsReady)return;
+    if(id!==renderId || !imageReady || !originalReady || !labelsReady)return;
+    if(nextOriginal.width!==nextImage.width || nextOriginal.height!==nextImage.height){loadError();return;}
     const changed=!image || image.width!==nextImage.width || image.height!==nextImage.height;
-    image=nextImage;labelImage=renderedArgs.labels_image ? nextLabels : null;
+    image=nextImage;originalImage=nextOriginal;labelImage=renderedArgs.labels_image ? nextLabels : null;
     canvas.width=image.width;canvas.height=image.height;
+    originalCanvas.width=image.width;originalCanvas.height=image.height;
+    const note=document.getElementById('original-note');
+    note.textContent=renderedArgs.original_note || '';note.hidden=!note.textContent;
     const labels=renderedArgs.fiber_id_labels || [];
     canvas.dataset.fiberIds=JSON.stringify(labels.map(function(x){return x.fiber_id;}));
     canvas.dataset.idLabels=JSON.stringify(labels);
@@ -147,12 +181,14 @@ window.addEventListener('message',function(event){
   }
   function loadError(){
     if(id!==renderId)return;
-    busy=true;controls();status('The image or ID layer could not load. Refresh before editing.');
+    busy=true;controls();status('The original, analysis or ID layer could not load at matching dimensions. Refresh before editing.');
   }
   nextImage.onload=function(){imageReady=true;commitImages();};
+  nextOriginal.onload=function(){originalReady=true;commitImages();};
   nextLabels.onload=function(){labelsReady=true;commitImages();};
-  nextImage.onerror=nextLabels.onerror=loadError;
+  nextImage.onerror=nextOriginal.onerror=nextLabels.onerror=loadError;
   nextImage.src=renderedArgs.image;
+  nextOriginal.src=renderedArgs.original_image;
   if(renderedArgs.labels_image)nextLabels.src=renderedArgs.labels_image;
 });
 window.addEventListener('resize',resize);

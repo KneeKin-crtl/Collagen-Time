@@ -168,6 +168,11 @@ patcher.start()
         raise RuntimeError('Bundled UI must provide one interactive primary counting overlay.')
     import json
     label_args=json.loads(app.main.get('component_instance')[0].proto.json_args)
+    from collagen.editor import original_preview
+    uploaded_pixels = np.zeros((80, 120), np.uint16)
+    uploaded_pixels[30:39, 15:100] = 45000
+    if label_args['original_image'] != original_preview(uploaded_pixels)[0]:
+        raise RuntimeError('Bundled comparison must retain the exact original source pixels.')
     if [item['fiber_id'] for item in label_args['fiber_id_labels']] != [1]:
         raise RuntimeError('Bundled ID label must match the measured fiber ID.')
     editor = resource_root() / 'assets' / 'fiber_editor' / 'index.html'
