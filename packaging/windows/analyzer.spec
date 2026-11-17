@@ -7,6 +7,7 @@ root = Path(SPECPATH).parent.parent
 analysis = Analysis(
     [str(root / 'desktop.py')],
     pathex=[str(root)],
+    hookspath=[str(root / 'packaging' / 'windows' / 'hooks')],
     datas=[(str(root / 'app.py'), '.'),
            (str(root / 'assets' / 'collagen.png'), 'assets'),
            (str(root / 'assets' / 'collagen.ico'), 'assets')]

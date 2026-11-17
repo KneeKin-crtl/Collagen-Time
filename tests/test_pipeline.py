@@ -31,7 +31,7 @@ def test_segmentation_and_qc_export():
     assert result.table.crossing_merge.sum() == 1
     assert 'below_min_area' in ';'.join(result.table.qc_flags)
     with zipfile.ZipFile(BytesIO(result_archive(result))) as archive:
-        assert len(archive.namelist()) == 7
+        assert len(archive.namelist()) == 8
         assert np.array_equal(tifffile.imread(BytesIO(archive.read('original.tiff'))), image)
         labels = tifffile.imread(BytesIO(archive.read('labels.tiff')))
         assert np.array_equal(labels, result.labels)
@@ -47,6 +47,26 @@ def test_empty_and_dark_segmentation():
     image[10:15, 10:50] = 0
     result = analyze(image, 1, segmenter=ThresholdSegmenter(bright=False))
     assert result.summary['accepted_isolated_count'] == 1
+
+
+@pytest.mark.parametrize('method,opening,closing', [
+    ('manual', 0, 0), ('local', 0, 0), ('manual', 2, 0), ('manual', 0, 2),
+])
+def test_configured_threshold_and_morphology_preserve_isolated_fiber(method, opening, closing):
+    image = np.zeros((80, 120), np.uint8)
+    image[30:39, 15:100] = 200
+    if opening:
+        image[10, 10] = 200  # Opening must remove this detached speck.
+    if closing:
+        image[34, 50] = 0  # Closing must fill this interior hole.
+    result = analyze(image, .5, segmenter=ThresholdSegmenter(
+        method=method, opening_radius=opening, closing_radius=closing))
+    assert result.summary['candidate_count'] == 1
+    assert result.summary['accepted_isolated_count'] == 1
+    assert result.mask[34, 50]
+    assert not result.mask[10, 10]
+    assert result.mask.shape == image.shape
+    assert np.array_equal(result.original, image)
 
 
 def test_custom_segmenter_and_loop_review():

@@ -1,3 +1,8 @@
+def counted_candidates(table):
+    """The counting decision shared by summary statistics and visualization."""
+    return table['review_status'].eq('accepted')
+
+
 def classify(measurement, border, area, min_area):
     flags = []
     if area < min_area:

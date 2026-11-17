@@ -3,6 +3,7 @@ import json
 import zipfile
 import numpy as np
 import tifffile
+from .visualization import count_overlay
 
 
 def csv_bytes(table):
@@ -13,7 +14,8 @@ def result_archive(result):
     output = BytesIO()
     with zipfile.ZipFile(output, "w", zipfile.ZIP_DEFLATED) as archive:
         for name, array in {"original": result.original, "segmentation": result.mask.astype(np.uint8),
-                            "labels": result.labels.astype(np.uint32), "annotated": result.annotated}.items():
+                            "labels": result.labels.astype(np.uint32), "annotated": result.annotated,
+                            "count_overlay": count_overlay(result.original, result.labels, result.table)}.items():
             buffer = BytesIO()
             tifffile.imwrite(buffer, array)
             archive.writestr(name + ".tiff", buffer.getvalue())

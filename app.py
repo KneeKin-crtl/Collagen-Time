@@ -11,6 +11,7 @@ from collagen.export import csv_bytes, result_archive
 from collagen.validation import comparison_report
 from collagen.workbook import import_workbook, workbook_summary, image_manifest
 from collagen.resources import asset_path
+from collagen.visualization import count_overlay, display_rgb
 
 
 @st.cache_data(show_spinner=False, max_entries=2)
@@ -21,6 +22,7 @@ def load_preview(data, filename):
 
 @st.cache_data(show_spinner=False, max_entries=2)
 def cached_pixels(data, filename, settings):
+    """Cache full-resolution candidates and their detailed decision annotation."""
     image, _ = load_preview(data, filename)
     return analyze_pixels(image, filename, ThresholdSegmenter(**settings['segmentation']),
                           settings['sigma'], settings['min_area'], settings['exclusion_px'],
@@ -43,10 +45,7 @@ if upload is not None:
 if st.session_state.get('request', {}).get('image_key') != image_key:
     st.session_state.pop('request', None)
     st.session_state.pop('archive', None)
-if proposal is not None:
-    x0, y0, x1, y1 = proposal
-    st.image(normalize(image[y0:y1, x0:x1]), caption='Proposed scale-bar/text region. Check this preview and confirm the rectangle to exclude it.', width=360)
-
+    st.session_state.pop('fiber_details', None)
 with st.sidebar:
     with st.form('analysis_controls'):
         calibration = st.number_input('Calibration (µm/pixel)', min_value=0.000001, value=None,
@@ -69,6 +68,9 @@ with st.sidebar:
             bounds = proposal or (0, 0, 0, 0)
             st.caption('Exclusion coordinates use original pixels: left/top inclusive, right/bottom exclusive. Intersecting objects stay in QC outputs but cannot be accepted.')
             if proposal is not None:
+                with st.expander('Scale-bar region preview', expanded=False):
+                    x0, y0, x1, y1 = proposal
+                    st.image(normalize(image[y0:y1, x0:x1]), caption='Check the proposed exclusion region against the original.')
                 scale_review = st.selectbox('Scale-bar review', ['Review required', 'Exclude rectangle', 'No exclusion needed (reviewed)'], key='review-' + image_key)
                 exclude_region = scale_review == 'Exclude rectangle'
             else:
@@ -113,11 +115,18 @@ if request is not None and image is not None and request['image_key'] == image_k
                                  calibration_source='entered by operator for this original image',
                                  scale_bar_review=request['scale_bar_review'])
         st.json(result.summary)
-        cols = st.columns(2)
-        cols[0].image(normalize(image), caption='Original (unchanged resolution)', clamp=True)
-        cols[1].image(result.mask.astype('uint8') * 255, caption='Segmentation mask (excluded candidates retained)')
-        cols[0].image(label2rgb(result.labels, bg_label=0), caption='Labeled candidates')
-        cols[1].image(result.annotated, caption='IDs and centerlines: green accepted; orange requires review; rectangles excluded from accepted statistics')
+        st.image(count_overlay(result.original, result.labels, result.table),
+                 caption='Fiber counting results: green = included in the final count; red = identified candidates excluded from the final count.')
+        st.caption(f"Green: {result.summary['accepted_isolated_count']} counted fibers · Red: {result.summary['review_required_count']} excluded candidates. Colors follow the API counting decisions. Unlabeled areas remain unchanged; they are not automatically excluded fibers.")
+        details = st.expander('View Detailed Fiber Analysis', expanded=False,
+                              key='fiber_details', on_change='rerun')
+        if details.open:
+            with details:
+                cols = st.columns(2)
+                cols[0].image(display_rgb(image), caption='Original (unchanged resolution)')
+                cols[1].image(result.mask.astype('uint8') * 255, caption='Segmentation mask (excluded candidates retained)')
+                cols[0].image(label2rgb(result.labels, bg_label=0), caption='Labeled candidates')
+                cols[1].image(result.annotated, caption='Detailed IDs and centerlines: green counted; red excluded; rectangles mark excluded regions')
         st.dataframe(result.table, hide_index=True)
         st.download_button('Download per-fiber CSV', csv_bytes(result.table), 'fibers.csv', 'text/csv')
         if st.button('Prepare QC archive'):

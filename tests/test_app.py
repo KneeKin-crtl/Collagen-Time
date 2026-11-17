@@ -106,11 +106,16 @@ def test_new_image_needs_its_own_calibration_and_clears_old_results(uploads):
     uploads['image'] = ('first.tiff', image_bytes(image))
     app = submit(AppTest.from_file(APP).run(timeout=30))
     assert app.dataframe
+    app.session_state['fiber_details'] = True
+    app.run(timeout=30)
     image[10:15, 10:40] = 45000
     uploads['image'] = ('second.tiff', image_bytes(image))
     app.run(timeout=30)
     assert not app.dataframe
     assert widget(app, 'number_input', 'Calibration (µm/pixel)').value is None
+    submit(app)
+    details = next(e for e in app.expander if e.label == 'View Detailed Fiber Analysis')
+    assert not details.proto.expanded
 
 
 def test_scale_bar_proposal_requires_confirmation_and_preserves_candidates(uploads):
@@ -180,3 +185,39 @@ def test_app_workbook_review_without_an_image(uploads):
     assert not app.error
     assert app.dataframe[0].value.iloc[0].measurement_count == 1
     assert len(app.dataframe[1].value) == 1
+
+
+def test_primary_overlay_and_lazy_details_follow_actual_counts(uploads):
+    from collagen.pipeline import analyze_pixels
+    image = np.zeros((80, 120), np.uint16)
+    image[5:12, :30] = 45000  # border-truncated: not counted
+    image[30:39, 40:110] = 45000  # isolated: counted
+    uploads['image'] = ('overlay-layout.tiff', image_bytes(image))
+    with patch('collagen.pipeline.analyze_pixels', wraps=analyze_pixels) as geometry:
+        app = submit(AppTest.from_file(APP).run(timeout=30))
+        assert not app.exception
+        assert not app.error
+        counts = json.loads(app.json[0].value)
+        assert counts['accepted_isolated_count'] == 1
+        assert counts['review_required_count'] == 1
+        primary_images = app.main.get('image')
+        assert len(primary_images) == 1
+        assert 'green = included' in primary_images[0].proto.imgs[0].caption
+        details = next(e for e in app.expander if e.label == 'View Detailed Fiber Analysis')
+        assert not details.proto.expanded
+        assert len(details.get('image')) == 0
+        before = app.dataframe[0].value.copy(deep=True)
+        app.session_state['fiber_details'] = True
+        app.run(timeout=30)
+        assert not app.exception
+        details = next(e for e in app.expander if e.label == 'View Detailed Fiber Analysis')
+        assert details.proto.expanded
+        assert len(details.get('image')) == 4
+        assert len(app.main.get('image')) == 5  # primary plus four detailed stages
+        assert json.loads(app.json[0].value) == counts
+        assert app.dataframe[0].value.equals(before)
+        assert geometry.call_count == 1
+        app.session_state['fiber_details'] = False
+        app.run(timeout=30)
+        assert len(app.main.get('image')) == 1
+        assert geometry.call_count == 1

@@ -4,7 +4,9 @@ A modular, non-AI research baseline for single-plane TIFF, PNG, and JPEG microsc
 
 ## Run locally
 
-Requires Python 3.11 or newer (tested with Python 3.12). From this repository:
+Use Python 3.12 for the stable locked setup. An isolated, experimental
+[Python 3.15.2 setup](docs/python315.md) uses a separate package list and CI
+workflow; it includes a prerelease scikit-image dependency. From this repository:
 
 ```bash
 python -m venv .venv
@@ -48,7 +50,26 @@ Skeleton edges use weights 1 for horizontal/vertical movement and sqrt(2) for di
 
 Width is **twice the Euclidean distance to background at centerline pixels**, an approximation to manual perpendicular edge-to-edge diameter. Endpoint/junction neighborhoods are excluded using the larger of the configured radius and local distance-transform radius. Mean and population SD describe retained width samples, not uncertainty or between-fiber variability. Digital boundaries, skeleton bias, focus, stain, threshold choice, and curvature affect estimates. Length is between skeleton endpoints and does not include inferred end-cap extensions. Digital arc lengths have orientation-dependent bias.
 
-The UI shows original, binary mask, labeled mask, IDs and centerlines (green accepted, orange review), summary counts, and the per-candidate table. Download CSV or a ZIP with lossless TIFF outputs, CSV, and JSON summary. Endpoints are JSON lists of `[x, y]` pixel coordinates. Missing measurements are empty CSV fields. QC flags and review status are automatic suggestions; no manual review editing is implemented yet.
+The primary view is one full-resolution overlay on the original: **green** marks
+candidates included in the final count and **red** marks identified candidates
+excluded from it. Color follows each candidate's API `review_status`, using the
+same acceptance rule as summary statistics. Foreground in a segmentation mask
+alone does not mean counted, and unlabeled background is not painted red. The
+overlay is a transparent tint with no ID labels or rectangles to obscure the view.
+
+The four processing stages—original, binary mask, labeled candidates, and detailed
+IDs/centerlines—remain in the collapsed **View Detailed Fiber Analysis** section.
+They render when opened; opening/closing it reuses cached analysis. Detailed
+centerlines also use green/red. The scale-bar preview is in the sidebar's exclusion
+controls. This tracked expander requires Streamlit 1.65 or newer (as pinned).
+
+Download CSV or a QC ZIP with original, segmentation, labels, detailed annotation
+and `count_overlay.tiff`, plus CSV, summary and analysis parameters. The saved
+count overlay uses the same per-ID decisions as the displayed primary view.
+Endpoints are JSON lists of `[x, y]` pixel coordinates. Missing measurements are
+empty CSV fields. QC flags and review status are automatic suggestions; no manual
+per-fiber review editor is implemented yet. A green counting decision does not
+establish biological correctness or measurement accuracy.
 
 ## Modules
 

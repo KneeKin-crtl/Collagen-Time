@@ -113,11 +113,18 @@ def self_test():
     from collagen.export import result_archive
     from collagen.validation import comparison_report
     from collagen.workbook import import_workbook
+    from collagen.segmentation import ThresholdSegmenter
     image = np.zeros((80, 120), dtype=np.uint8)
     image[30:39, 15:100] = 200
     result = analyze(image, .5, 'desktop-smoke')
     if result.summary['accepted_isolated_count'] != 1 or not result_archive(result):
         raise RuntimeError('Synthetic analysis/export failed.')
+    # Optional settings must also work with the bundled lazy image modules.
+    for method in ('manual', 'local'):
+        configured = analyze(image, .5, 'desktop-options', segmenter=ThresholdSegmenter(
+            method=method, opening_radius=2, closing_radius=2))
+        if configured.summary['accepted_isolated_count'] != 1:
+            raise RuntimeError(f'Bundled {method} threshold/morphology failed.')
     manual = result.table[['image_id', 'fiber_id', 'length_um', 'mean_diameter_um']].copy()
     if comparison_report(result.table, manual).counts['matched_count'] != 1:
         raise RuntimeError('Comparison failed.')
@@ -157,6 +164,13 @@ patcher.start()
         raise RuntimeError(f'Bundled upload UI failed: {app.exception} {app.error}')
     if app.dataframe[0].value.review_status.tolist() != ['accepted']:
         raise RuntimeError('Bundled UI measurement failed.')
+    if len(app.main.get('image')) != 1:
+        raise RuntimeError('Bundled UI must default to one primary counting overlay.')
+    app.session_state['fiber_details'] = True
+    app.run(timeout=60)
+    details = next(e for e in app.expander if e.label == 'View Detailed Fiber Analysis')
+    if len(details.get('image')) != 4 or len(app.main.get('image')) != 5:
+        raise RuntimeError('Bundled detailed analysis must retain all four stages.')
     if sys.platform == 'win32':
         import tkinter as tk
         set_desktop_identity()
