@@ -20,6 +20,7 @@ import time
 import traceback
 import urllib.request
 import zlib
+import zipfile
 
 from playwright.sync_api import sync_playwright
 
@@ -59,6 +60,12 @@ def interactions(browser, url, root, output):
     def color(x,y):
         return editor().locator('#image').evaluate(
             '(c,p)=>Array.from(c.getContext("2d").getImageData(p[0],p[1],1,1).data)',[x,y])[:3]
+    def id_labels():
+        return json.loads(editor().locator('#image').get_attribute('data-id-labels'))
+    def assert_ids(expected):
+        actual=id_labels()
+        assert [item['fiber_id'] for item in actual]==expected, actual
+        assert all(item['text']==str(item['fiber_id']) for item in actual)
     def wait_color(x,y,green):
         deadline = time.monotonic() + 30
         while time.monotonic() < deadline:
@@ -85,13 +92,24 @@ def interactions(browser, url, root, output):
     open_analysis()
     wait_color(50,35,True)
     wait_color(50,75,True)
+    assert_ids([1,2])  # Excluded border object 3 never gets an ID.
+    before_states=states()
+    with_ids=editor().locator('#image').evaluate('(c)=>c.toDataURL()')
+    editor().get_by_role('checkbox',name='Show accepted fiber IDs',exact=True).uncheck()
+    without_ids=editor().locator('#image').evaluate('(c)=>c.toDataURL()')
+    assert with_ids!=without_ids
+    assert states()==before_states
+    editor().get_by_role('checkbox',name='Show accepted fiber IDs',exact=True).check()
+    assert editor().locator('#image').evaluate('(c)=>c.toDataURL()')==with_ids
     click(50,35)
     wait_color(50,35,False)
+    assert_ids([2])
     assert color(50,75)[1] > color(50,75)[0], 'A neighboring object changed.'
     print('Exact click changed one object only',flush=True)
     editor().locator('#zoom').fill('400')
     click(50,35)
     wait_color(50,35,True)
+    assert_ids([1,2])
     click(50,35)
     wait_color(50,35,False)
     print('Zoomed click mapping passed',flush=True)
@@ -101,6 +119,7 @@ def interactions(browser, url, root, output):
         click(*point)
     editor().get_by_role('button',name='Save outline',exact=True).click()
     wait_color(240,125,True)
+    assert_ids([2,4])
     assert (4,'accepted',1) in states()
     print('Manual outline saved and measured',flush=True)
     with page.expect_download() as downloaded:
@@ -111,6 +130,15 @@ def interactions(browser, url, root, output):
     assert len(rows)==4 and rows[0]['classification']=='rejected'
     assert rows[-1]['object_source']=='manual' and float(rows[-1]['length_um'])>0
     assert rows[-1]['included_in_measurement_statistics']=='True'
+    before_labels=id_labels()
+    expected_ids=[int(row['fiber_id']) for row in rows if row['included_in_measurement_statistics']=='True']
+    assert [item['fiber_id'] for item in before_labels]==expected_ids
+    page.get_by_role('button',name='Prepare QC archive',exact=True).click()
+    with page.expect_download() as downloaded:
+        page.get_by_role('button',name='Download all QC outputs',exact=True).click()
+    downloaded.value.save_as(output/'analysis.zip')
+    with zipfile.ZipFile(output/'analysis.zip') as archive:
+        assert json.loads(archive.read('fiber_id_labels.json'))==before_labels
     page.screenshot(path=str(output/'review.png'),full_page=True)
     page.close()
     page = browser.new_page(viewport={'width':1500,'height':1100})
@@ -118,11 +146,17 @@ def interactions(browser, url, root, output):
     open_analysis()
     wait_color(50,35,False)
     wait_color(240,125,True)
+    assert id_labels()==before_labels
     editor().get_by_role('button',name='Undo',exact=True).click()
     deadline = time.monotonic() + 20
     while time.monotonic()<deadline and (4,'accepted',1) in states():
         time.sleep(.1)
     assert (4,None,0) in states()
+    # Wait for the same update to reach the displayed image, not just SQLite.
+    deadline=time.monotonic()+20
+    while time.monotonic()<deadline and [i['fiber_id'] for i in id_labels()]!=[2]:
+        time.sleep(.1)
+    assert_ids([2])
     print('Corrections and Undo survived reopening',flush=True)
     page.get_by_text('Feedback learning, model evaluation and backups',exact=True).click()
     page.get_by_role('button',name='Retrain Model Using Corrections',exact=True).click()
@@ -131,6 +165,8 @@ def interactions(browser, url, root, output):
     assert not errors, errors
     report = dict(exact_object_click=True,zoom_mapping=True,manual_outline=True,csv_updated=True,
                   restored_after_reopen=True,persistent_undo=True,insufficient_data_notice=True,
+                  measured_id_labels=True,label_visibility_updates=True,label_toggle_is_display_only=True,
+                  label_manifest_matches_csv=True,
                   browser_errors=errors)
     (output/'report.json').write_text(json.dumps(report,indent=2),encoding='utf-8')
     print('Browser interaction checks passed',flush=True)

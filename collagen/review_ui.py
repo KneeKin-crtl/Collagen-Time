@@ -10,6 +10,7 @@ from .feedback import FeedbackStore
 from .learning import retrain
 from .review import ReviewSession
 from .visualization import count_overlay
+from .id_labels import fiber_id_layer, composite_id_layer
 
 
 def reviewed_results(baseline, image_name, source_sha):
@@ -19,7 +20,9 @@ def reviewed_results(baseline, image_name, source_sha):
     except (OSError, sqlite3.Error, ValueError) as error:
         st.error(f'Manual review storage is unavailable: {error}. Baseline analysis remains available. Set COLLAGEN_FEEDBACK_DIR to a writable folder to enable saved review.')
         st.json(baseline.summary)
-        st.image(count_overlay(baseline.original, baseline.labels, baseline.table), caption='Baseline counting results; manual review unavailable.')
+        st.image(composite_id_layer(count_overlay(baseline.original,baseline.labels,baseline.table),
+                                   fiber_id_layer(baseline.labels,baseline.id_labels)),
+                 caption='Baseline results with measured accepted fiber IDs; manual review unavailable.')
         return baseline
 
     key = review.analysis_key
@@ -42,6 +45,8 @@ def reviewed_results(baseline, image_name, source_sha):
     model_name = review.model['model_id'][:12] if review.model else 'baseline rules'
     st.caption(f'Object classifier: {model_name}. Click an object to toggle acceptance; background clicks do not select a neighboring object. Use the outline tool to add a missed fiber or isolate one from a rejected merged object.')
     event = fiber_editor(image=image_url(count_overlay(result.original, result.labels, result.table)),
+                         labels_image=image_url(fiber_id_layer(result.labels,result.id_labels)),
+                         fiber_id_labels=result.id_labels,
                          context=review.context, ack_token=st.session_state.get(ack_key),
                          event_ok=notice.get('level') == 'success', message=notice.get('text', ''),
                          key='fiber-editor-' + key, default=None)
@@ -61,6 +66,7 @@ def reviewed_results(baseline, image_name, source_sha):
         st.rerun()
 
     st.caption(f"Green: {result.summary['accepted_count']} accepted objects · Red: {result.summary['review_required_count']} rejected candidates · Measurable accepted fibers: {result.summary['accepted_measurement_count']}. Accepted objects with unavailable or partial geometry stay out of measurement statistics.")
+    st.caption('White ID callouts label only measurable accepted fibers and match fiber_id in the CSV opened in Excel. Zoom for dense areas, or hide IDs to inspect boundaries. Click the colored fiber itself to change its review decision.')
     if result.summary['accepted_pending_measurement_count']:
         st.warning('Some accepted objects cannot provide reliable complete measurements. Their original QC flags are retained. Outline a separated individual fiber if appropriate; accepting a merged or truncated object does not reconstruct its missing centerline.')
 

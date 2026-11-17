@@ -206,6 +206,8 @@ def test_primary_overlay_and_lazy_details_follow_actual_counts(uploads):
         assert 'fiber_editor' in editors[0].proto.component_name
         editor_args = json.loads(editors[0].proto.json_args)
         assert editor_args['image'].startswith('data:image/png;base64,')
+        assert editor_args['labels_image'].startswith('data:image/png;base64,')
+        assert [i['fiber_id'] for i in editor_args['fiber_id_labels']]==[2]
         assert editor_args['context'] == app.session_state['review_context']
         details = next(e for e in app.expander if e.label == 'View Detailed Fiber Analysis')
         assert not details.proto.expanded
@@ -242,6 +244,8 @@ def test_manual_buttons_update_csv_counts_restore_on_reopen_and_undo(uploads):
         widget(app,'button','Mark rejected').click().run(timeout=30)
         assert not app.exception and not app.error
         assert app.dataframe[0].value.classification.tolist()==['rejected']
+        args=json.loads(app.main.get('component_instance')[0].proto.json_args)
+        assert args['fiber_id_labels']==[]
         assert json.loads(app.json[0].value)['accepted_measurement_count']==0
         assert 'archive' not in app.session_state
         assert geometry.call_count==1
@@ -249,6 +253,8 @@ def test_manual_buttons_update_csv_counts_restore_on_reopen_and_undo(uploads):
         assert reopened.dataframe[0].value.classification.tolist()==['rejected']
         widget(reopened,'button','Undo last correction').click().run(timeout=30)
         assert reopened.dataframe[0].value.classification.tolist()==['accepted']
+        args=json.loads(reopened.main.get('component_instance')[0].proto.json_args)
+        assert [i['fiber_id'] for i in args['fiber_id_labels']]==[1]
         assert reopened.dataframe[0].value.length_um.iloc[0]==length
         assert json.loads(reopened.json[0].value)['accepted_measurement_count']==1
         assert geometry.call_count==1

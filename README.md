@@ -58,6 +58,13 @@ clicks do not snap to nearby objects. Green does not guarantee measurable geomet
 accepted objects with unavailable or partial measurements are reported separately
 and excluded from measurement aggregates. See [manual review and learning](docs/feedback-learning.md).
 
+White-on-dark ID callouts label **only measurable accepted fibers**, using the
+exact `fiber_id` exported in the Excel-readable CSV. Labels prefer background beside
+each fiber, with short leaders anchored to that same object. Zoom for crowded areas;
+the editor's **Show accepted fiber IDs** checkbox can hide labels for boundary
+inspection without changing decisions or data. Rejected, excluded and accepted-but-
+unmeasurable objects have no ID callout. The detailed annotation follows the same rule.
+
 The four processing stages—original, binary mask, labeled candidates, and detailed
 IDs/centerlines—remain in the collapsed **View Detailed Fiber Analysis** section.
 They render when opened; opening/closing it reuses cached analysis. Detailed
@@ -67,6 +74,9 @@ controls. This tracked expander requires Streamlit 1.65 or newer (as pinned).
 Download CSV or a QC ZIP with original, segmentation, labels, detailed annotation
 and `count_overlay.tiff`, plus CSV, summary and analysis parameters. The saved
 count overlay uses the same per-ID decisions as the displayed primary view.
+Both exported annotated images retain the accepted ID labels; `fiber_id_labels.json`
+records each displayed ID, its source image, anchor and placement. Original images,
+instance masks, measurements and CSV fields are unchanged by labeling.
 Endpoints are JSON lists of `[x, y]` pixel coordinates. Missing measurements are
 empty CSV fields. The full CSV preserves original decisions, QC flags, manual/model
 provenance and measurement eligibility. A separate accepted-measurements CSV contains
@@ -83,6 +93,7 @@ establish biological correctness or measurement accuracy.
 - `quality`: acceptance and exclusion flags
 - `exclusions`: validated original-pixel rectangles and scale-panel proposals
 - `visualization`: IDs and centerlines
+- `id_labels`: display-only accepted ID selection, callout placement and compositing
 - `export`: CSV and complete QC archive
 - `validation`: explicit ground-truth matching
 - `pipeline`: orchestration and accepted-only statistics

@@ -124,7 +124,7 @@ if request is not None and image is not None and request['image_key'] == image_k
                 cols[0].image(display_rgb(image), caption='Original (unchanged resolution)')
                 cols[1].image(result.mask.astype('uint8') * 255, caption='Segmentation mask (excluded candidates retained)')
                 cols[0].image(label2rgb(result.labels, bg_label=0), caption='Labeled candidates')
-                cols[1].image(result.annotated, caption='Detailed IDs and centerlines: green counted; red excluded; rectangles mark excluded regions')
+                cols[1].image(result.annotated, caption='Measured accepted fiber IDs and centerlines; rejected or unmeasurable objects have no ID label')
         st.dataframe(result.table, hide_index=True)
         st.download_button('Download per-fiber CSV', csv_bytes(result.table), 'fibers.csv', 'text/csv')
         if 'included_in_measurement_statistics' in result.table:

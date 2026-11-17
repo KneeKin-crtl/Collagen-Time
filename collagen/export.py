@@ -4,6 +4,7 @@ import zipfile
 import numpy as np
 import tifffile
 from .visualization import count_overlay
+from .id_labels import fiber_id_layout, fiber_id_layer, composite_id_layer
 
 
 def csv_bytes(table):
@@ -12,14 +13,18 @@ def csv_bytes(table):
 
 def result_archive(result):
     output = BytesIO()
+    id_labels = result.id_labels if result.id_labels is not None else fiber_id_layout(result.labels, result.table)
+    labeled_overlay = composite_id_layer(count_overlay(result.original,result.labels,result.table),
+                                         fiber_id_layer(result.labels,id_labels))
     with zipfile.ZipFile(output, "w", zipfile.ZIP_DEFLATED) as archive:
         for name, array in {"original": result.original, "segmentation": result.mask.astype(np.uint8),
                             "labels": result.labels.astype(np.uint32), "annotated": result.annotated,
-                            "count_overlay": count_overlay(result.original, result.labels, result.table)}.items():
+                            "count_overlay": labeled_overlay}.items():
             buffer = BytesIO()
             tifffile.imwrite(buffer, array)
             archive.writestr(name + ".tiff", buffer.getvalue())
         archive.writestr("fibers.csv", csv_bytes(result.table))
+        archive.writestr('fiber_id_labels.json',json.dumps(id_labels,indent=2,allow_nan=False))
         summary = {k: (None if isinstance(v, float) and not np.isfinite(v) else v) for k, v in result.summary.items()}
         archive.writestr("summary.json", json.dumps(summary, indent=2, allow_nan=False))
         archive.writestr("analysis_parameters.json", json.dumps(result.parameters, indent=2, allow_nan=False))
