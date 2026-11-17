@@ -63,6 +63,21 @@ jobs:
         run: |
           Copy-Item packaging/windows/READ-ME.txt dist/CollagenFiberAnalyzer/READ-ME.txt
           Set-Content dist/CollagenFiberAnalyzer/EXPERIMENTAL-PYTHON315.txt 'Experimental Python 3.15.2 build. Includes scikit-image 0.27.0rc1. Passing software tests does not establish measurement accuracy. Keep the stable build available.'
+      - name: Record packaged startup diagnostics
+        if: failure() && runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          Add-Content $env:GITHUB_STEP_SUMMARY '### Python 3.15 packaged startup diagnostics'
+          $logs = @(Get-ChildItem "$env:TEMP/collagen-runtime-*.log", "$env:TEMP/CollagenFiberAnalyzer/*.log" -ErrorAction SilentlyContinue)
+          if ($logs.Count -eq 0) {
+            Add-Content $env:GITHUB_STEP_SUMMARY 'No application startup logs were created.'
+          }
+          foreach ($log in $logs) {
+            Add-Content $env:GITHUB_STEP_SUMMARY "#### $($log.Name)"
+            Add-Content $env:GITHUB_STEP_SUMMARY '```text'
+            Get-Content $log.FullName | Add-Content $env:GITHUB_STEP_SUMMARY
+            Add-Content $env:GITHUB_STEP_SUMMARY '```'
+          }
       - uses: actions/upload-artifact@v6
         if: runner.os == 'Windows'
         with:
