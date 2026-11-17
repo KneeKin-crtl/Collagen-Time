@@ -1,5 +1,5 @@
 """Local, transactional review history and model registry. No pickle or cloud service."""
-from contextlib import contextmanager
+from contextlib import closing, contextmanager
 from datetime import datetime, timezone
 from io import BytesIO
 import hashlib
@@ -345,6 +345,8 @@ class FeedbackStore:
     def backup(self):
         with tempfile.TemporaryDirectory(prefix='collagen-feedback-backup-') as folder:
             path = Path(folder) / 'feedback.sqlite3'
-            with self.connect() as source, sqlite3.connect(path) as target:
+            # sqlite3's transaction context does not close its connection.
+            # Close explicitly before TemporaryDirectory cleanup on Windows.
+            with self.connect() as source, closing(sqlite3.connect(path)) as target:
                 source.backup(target)
             return path.read_bytes()

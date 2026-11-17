@@ -41,7 +41,10 @@ jobs:
       - name: Check dependencies
         run: python -m pip check
       - name: Run tests
-        run: python -m pytest -q
+        run: python -m pytest -q --junitxml=test-results.xml
+      - name: Record failed tests
+        if: failure()
+        run: python tools/ci_test_summary.py
       - name: Check source launcher
         run: python desktop.py --smoke-test
       - name: Package Windows executable
