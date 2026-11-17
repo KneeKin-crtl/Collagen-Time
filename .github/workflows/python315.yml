@@ -3,7 +3,7 @@ name: Experimental Python 3.15
 on:
   workflow_dispatch:
   push:
-    branches: ['python315-compatibility', 'interactive-fiber-feedback', 'accepted-fiber-id-labels', 'compare-original-analysis', 'fiber-selection-review-speed']
+    branches: ['python315-compatibility', 'interactive-fiber-feedback', 'accepted-fiber-id-labels', 'compare-original-analysis', 'fiber-selection-review-speed', 'fix-editor-image-transition']
   pull_request:
     paths:
       - 'requirements-python315.lock.txt'
@@ -73,7 +73,14 @@ jobs:
         run: python -m pip install -e ".[browser]"
       - name: Check packaged interactive corrections in Chrome
         if: runner.os == 'Windows'
-        run: python tools/check_feedback_browser.py --executable dist/CollagenFiberAnalyzer/CollagenFiberAnalyzer.exe --output-dir feedback-browser-results
+        run: python tools/check_feedback_browser.py --executable dist/CollagenFiberAnalyzer/CollagenFiberAnalyzer.exe --network-latency-ms 250 --output-dir feedback-browser-results
+      - name: Upload browser failure diagnostics
+        if: failure() && runner.os == 'Windows'
+        uses: actions/upload-artifact@v6
+        with:
+          name: FAILED-browser-diagnostics-python315
+          path: feedback-browser-results/
+          if-no-files-found: ignore
       - name: Record packaged startup diagnostics
         if: failure() && runner.os == 'Windows'
         shell: pwsh

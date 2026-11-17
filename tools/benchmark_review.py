@@ -1,5 +1,6 @@
 """Controlled browser benchmark; generated data only, no timing assertions."""
 import json
+import hashlib
 import statistics
 import struct
 import platform
@@ -19,11 +20,16 @@ def fixture(path):
     path.write_bytes(b'\x89PNG\r\n\x1a\n'+chunk(b'IHDR',struct.pack('!IIBBBBB',width,height,8,0,0,0,0))
                      +chunk(b'IDAT',zlib.compress(b''.join(b'\0'+r for r in rows)))+chunk(b'IEND',b''))
 
-def interactions(browser,url,root,output):
-    page=browser.new_page(viewport={'width':1500,'height':1100})
+def interactions(browser,url,root,output,network_latency_ms=0):
+    page=module.new_analysis_page(browser,network_latency_ms)
     page.goto(url)
     page.get_by_text('Review ImageJ Excel workbook',exact=True).wait_for()
+    app=page.locator('[data-testid="stApp"]')
+    module.expect(app).to_have_attribute('data-test-script-state','notRunning')
     page.locator('input[type=file]').first.set_input_files(str(root/'synthetic.png'))
+    source=hashlib.sha256((root/'synthetic.png').read_bytes()).hexdigest()
+    page.locator('.st-key-loaded-image-'+source).get_by_text('Loaded image: synthetic.png · 4096 × 3072 pixels',exact=True).wait_for()
+    module.expect(app).to_have_attribute('data-test-script-state','notRunning')
     page.get_by_text('Confirm exclusion rectangle',exact=True).wait_for(timeout=30000)
     calibration=page.get_by_role('spinbutton',name='Calibration (µm/pixel)',exact=True)
     calibration.fill('.02');calibration.press('Tab')
@@ -75,6 +81,7 @@ def interactions(browser,url,root,output):
             'metric':'pointerup to next animation frame after changed object pixel',
             'visual':stats(durations),'server_ack':stats(acknowledgments),
             'browser':browser.version,'platform':platform.platform(),
+            'network_latency_ms':network_latency_ms,
             'note':'Controlled local benchmark; no latency guarantee for other hardware or scientific accuracy claim.'}
     (output/'latency.json').write_text(json.dumps(report,indent=2))
     print(json.dumps(report,indent=2),flush=True)

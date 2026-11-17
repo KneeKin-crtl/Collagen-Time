@@ -22,8 +22,11 @@ function controls(){
   for(const id of ['accept','reject'])$(id).disabled=disabled || barrier() || !visible(objects.get(state?.selected));
   for(const id of ['undo','redo'])$(id).disabled=disabled || barrier();
   $('next').disabled=disabled;
+  for(const id of ['clickMode','viewMode','shortcuts','showIds','zoom'])$(id).disabled=!ready;
+  $('clickMode').disabled=disabled;
   $('save').disabled=disabled || pending().length>0 || state?.mode!=='outline' || state.points.length<3;
   canvas.dataset.pendingCount=String(pending().length);
+  canvas.dataset.editorReady=String(ready);
   $('toggle').setAttribute('aria-pressed',String(state?.mode==='review'));
   $('outline').setAttribute('aria-pressed',String(state?.mode==='outline'));
 }
@@ -51,6 +54,7 @@ function updateMetadata(){
   canvas.dataset.idLabels=JSON.stringify(labels);
   canvas.dataset.idsVisible=String(state.showIds);
   canvas.dataset.reviewContext=args.context||'';
+  canvas.dataset.sourceImage=JSON.stringify(args.source_image||{});
   const rows=Array.from(objects.values());
   const confirmed=new Map((args.objects||[]).map(o=>[o.fiber_id,o]));
   const reviewed=(args.review_progress?.reviewed||0)+rows.filter(o=>o.manual!==null && confirmed.get(o.fiber_id)?.manual===null).length;
@@ -171,9 +175,9 @@ $('viewMode').onchange=e=>{state.viewMode=e.target.value;paintRect([0,0,canvas.w
 $('showIds').onchange=e=>{state.showIds=e.target.checked;paintRect([0,0,canvas.width,canvas.height]);updateMetadata();};
 zoom.oninput=()=>{state.zoom=zoom.value;resize();};
 canvas.oncontextmenu=e=>{if(state?.mode==='review')e.preventDefault();};
-canvas.onpointerdown=e=>{down={x:e.clientX,y:e.clientY,button:e.button};};
+canvas.onpointerdown=e=>{down=editable()?{x:e.clientX,y:e.clientY,button:e.button,assetKey:committedKey}:null;};
 canvas.onpointerup=e=>{
-  if(!editable() || !down || Math.hypot(e.clientX-down.x,e.clientY-down.y)>5)return;
+  if(!editable() || !down || down.assetKey!==committedKey || Math.hypot(e.clientX-down.x,e.clientY-down.y)>5)return;
   const button=down.button;down=null;
   const r=canvas.getBoundingClientRect(),x=(e.clientX-r.left)*canvas.width/r.width,y=(e.clientY-r.top)*canvas.height/r.height;
   if(x<0 || y<0 || x>=canvas.width || y>=canvas.height)return;
@@ -189,7 +193,7 @@ canvas.onpointerup=e=>{
   if(button===0 || button===2)classify(id,action,{x,y});
 };
 canvas.onkeydown=e=>{
-  if(!state.shortcuts || !ready)return;
+  if(!state?.shortcuts || !ready)return;
   const key=e.key.toLowerCase();
   if((e.ctrlKey||e.metaKey) && ['z','y'].includes(key)){
     e.preventDefault();enqueue(key==='y'||e.shiftKey?'redo':'undo');return;
@@ -303,4 +307,4 @@ if(!shared.unloadHandler){
   });shared.unloadHandler=true;
 }
 window.addEventListener('resize',resize);
-post('streamlit:componentReady',{apiVersion:1});height();
+controls();post('streamlit:componentReady',{apiVersion:1});height();

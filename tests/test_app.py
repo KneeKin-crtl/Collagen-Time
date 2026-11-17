@@ -1,4 +1,5 @@
 from io import BytesIO
+import hashlib
 import json
 from pathlib import Path
 from unittest.mock import patch
@@ -205,6 +206,9 @@ def test_primary_overlay_and_lazy_details_follow_actual_counts(uploads):
         assert len(editors) == 1
         assert 'fiber_editor' in editors[0].proto.component_name
         editor_args = json.loads(editors[0].proto.json_args)
+        assert editor_args['source_image']==dict(name='overlay-layout.tiff',
+            sha256=hashlib.sha256(uploads['image'][1]).hexdigest(),width=120,height=80)
+        assert any(c.value=='Loaded image: overlay-layout.tiff · 120 × 80 pixels' for c in app.caption)
         assert editor_args['base_image'].startswith('data:image/png;base64,')
         from test_editor import decode_preview
         np.testing.assert_array_equal(decode_preview(editor_args['original_image']), image)
@@ -264,6 +268,9 @@ def test_comparison_original_stays_unchanged_on_review_and_changes_with_upload(u
     submit(app)
     assert not app.exception and not app.error
     replacement = json.loads(app.main.get('component_instance')[0].proto.json_args)
+    assert replacement['source_image']['name']=='second.tiff'
+    assert replacement['source_image']['sha256']==hashlib.sha256(uploads['image'][1]).hexdigest()
+    assert replacement['source_image']['sha256']!=args['source_image']['sha256']
     assert replacement['original_image'] != original_url
     np.testing.assert_array_equal(decode_preview(replacement['original_image']), image)
 

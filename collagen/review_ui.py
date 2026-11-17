@@ -14,7 +14,7 @@ from .id_labels import fiber_id_layout
 from .selection import select_baseline
 
 
-def comparison_editor(result, review=None, **kwargs):
+def comparison_editor(result, review=None, image_name='', **kwargs):
     """Keep both views tied to the exact source used by this analysis."""
     assets = getattr(review,'editor_assets',None)
     if assets is None:
@@ -35,6 +35,9 @@ def comparison_editor(result, review=None, **kwargs):
     payload = {} if acknowledged else assets
     known_sprites = set(acknowledged.get('sprites', ()))
     return fiber_editor(**payload, asset_key=asset_key, objects=editor_objects(result.table),
+                        source_image=dict(name=image_name or getattr(review,'image_name',''),
+                            sha256=result.parameters.get('source_sha256',''),
+                            width=int(result.original.shape[1]),height=int(result.original.shape[0])),
                         review_progress=dict(total=len(result.table),
                             reviewed=int(result.table.manual_classification.notna().sum()) if 'manual_classification' in result.table else 0),
                         id_sprites=[sprites[item['fiber_id']] for item in result.id_labels
@@ -61,7 +64,7 @@ def reviewed_results(baseline, image_name, source_sha, filters=None):
         if filters is not None:
             baseline = select_baseline(baseline,filters)
         st.json(baseline.summary)
-        comparison_editor(baseline, review_enabled=False, key='baseline-comparison', default=None,
+        comparison_editor(baseline, image_name=image_name, review_enabled=False, key='baseline-comparison', default=None,
                           message='Baseline results; saved manual review is unavailable.')
         return baseline
 

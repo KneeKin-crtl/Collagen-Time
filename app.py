@@ -42,6 +42,8 @@ if upload is not None:
     image_key = hashlib.sha256(data).hexdigest() + ':' + upload.name
     try:
         image, proposal = load_preview(data, upload.name)
+        with st.container(key='loaded-image-' + image_key.split(':',1)[0]):
+            st.caption(f'Loaded image: {upload.name} · {image.shape[1]} × {image.shape[0]} pixels')
     except ValueError as error:
         st.error(str(error))
 if st.session_state.get('request', {}).get('image_key') != image_key:

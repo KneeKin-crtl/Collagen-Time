@@ -52,7 +52,14 @@ jobs:
       - name: Install browser test driver
         run: python -m pip install -e ".[browser]"
       - name: Check packaged interactive corrections in Chrome
-        run: python tools/check_feedback_browser.py --executable dist/CollagenFiberAnalyzer/CollagenFiberAnalyzer.exe --output-dir feedback-browser-results
+        run: python tools/check_feedback_browser.py --executable dist/CollagenFiberAnalyzer/CollagenFiberAnalyzer.exe --network-latency-ms 250 --output-dir feedback-browser-results
+      - name: Upload browser failure diagnostics
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: FAILED-browser-diagnostics-stable
+          path: feedback-browser-results/
+          if-no-files-found: ignore
       - uses: actions/upload-artifact@v4
         with:
           name: CollagenFiberAnalyzer-Windows-x64

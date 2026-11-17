@@ -6,6 +6,7 @@ Chromium is discovered locally on Linux; Windows uses installed Google Chrome.
 import argparse
 from contextlib import closing, suppress
 import csv
+import hashlib
 import json
 import os
 from pathlib import Path
@@ -25,6 +26,40 @@ import zipfile
 from playwright.sync_api import sync_playwright, expect
 
 
+def editor_diagnostics(page):
+    """Report state instead of hiding all iframe/initialization errors as a save timeout."""
+    result={'frames':[]}
+    with suppress(Exception):
+        result['app']=page.locator('[data-testid="stApp"]').evaluate(
+            '(e)=>({script:e.getAttribute("data-test-script-state"),connection:e.getAttribute("data-test-connection-state")})')
+    with suppress(Exception):
+        result['alerts']=page.get_by_test_id('stAlert').all_text_contents()
+    for frame in page.frames:
+        if 'fiber_editor' not in frame.url:
+            continue
+        with suppress(Exception):
+            result['frames'].append(frame.evaluate('''()=>{
+                const c=document.getElementById('image'),o=document.getElementById('original-image');
+                return {canvas:c?[c.width,c.height]:null,original:o?[o.width,o.height]:null,
+                    pending:c?.dataset.pendingCount,context:c?.dataset.reviewContext,
+                    ready:c?.dataset.editorReady,source:c?.dataset.sourceImage,
+                    status:document.getElementById('status')?.textContent,
+                    progress:document.getElementById('review-progress')?.textContent,
+                    disabled:document.getElementById('toggle')?.disabled};
+            }'''))
+    return result
+
+
+def new_analysis_page(browser, network_latency_ms=0):
+    page=browser.new_page(viewport={'width':1500,'height':1100})
+    if network_latency_ms:
+        session=page.context.new_cdp_session(page)
+        session.send('Network.enable')
+        session.send('Network.emulateNetworkConditions',dict(offline=False,latency=network_latency_ms,
+                     downloadThroughput=-1,uploadThroughput=-1))
+    return page
+
+
 def synthetic_png(path, variant=False):
     # Mid-gray microscopy-like background makes plain black ID glyphs visible.
     # Larger than either result column: exercise fit-to-width and source mapping.
@@ -33,7 +68,7 @@ def synthetic_png(path, variant=False):
         for y in range(y0,y1):
             rows[y][x0:x1] = bytes([200]) * (x1-x0)
     if variant:
-        rows[-1][-1]=79  # Different original identity without adding a bright object.
+        rows[-1][-1]=80-int(variant)  # Different identity without adding a bright object.
     def chunk(kind, data):
         return struct.pack('!I',len(data)) + kind + data + struct.pack('!I',zlib.crc32(kind+data))
     raw = b''.join(b'\x00' + row for row in rows)
@@ -42,17 +77,32 @@ def synthetic_png(path, variant=False):
                      + chunk(b'IDAT',zlib.compress(raw)) + chunk(b'IEND',b''))
 
 
-def interactions(browser, url, root, output):
-    page = browser.new_page(viewport={'width':1500,'height':1100})
+def interactions(browser, url, root, output, network_latency_ms=0):
+    page = new_analysis_page(browser,network_latency_ms)
     errors = []
+    expected_source=None
     page.on('pageerror',lambda error: errors.append(str(error)))
     def editor():
         return page.frame_locator('iframe[title*="fiber_editor"]')
+    def wait_idle():
+        app=page.locator('[data-testid="stApp"]')
+        expect(app).to_have_attribute('data-test-connection-state','CONNECTED',timeout=30000)
+        expect(app).to_have_attribute('data-test-script-state','notRunning',timeout=30000)
+    def upload_image(path):
+        nonlocal expected_source
+        # An upload replacement briefly clears the previous image. A blank
+        # calibration during that phase belongs to the temporary no-image form.
+        wait_idle()
+        expected_source=hashlib.sha256(path.read_bytes()).hexdigest()
+        page.locator('input[type=file]').first.set_input_files(str(path))
+        loaded=page.locator('.st-key-loaded-image-'+expected_source)
+        loaded.get_by_text(f'Loaded image: {path.name} · 1280 × 800 pixels',exact=True).wait_for(timeout=30000)
+        wait_idle()
     def open_analysis():
         page.goto(url)
         page.get_by_role('heading',name='Collagen Fiber Analyzer',exact=True).wait_for()
         page.get_by_text('Review ImageJ Excel workbook',exact=True).wait_for()
-        page.locator('input[type=file]').first.set_input_files(str(root/'synthetic.png'))
+        upload_image(root/'synthetic.png')
         # Wait for the image-specific form, rather than typing into the initial
         # empty-upload calibration widget while upload processing is in flight.
         page.get_by_text('Confirm exclusion rectangle',exact=True).wait_for(timeout=30000)
@@ -64,18 +114,26 @@ def interactions(browser, url, root, output):
         editor().locator('#image').wait_for(state='visible',timeout=30000)
         editor().locator('#original-image').wait_for(state='visible',timeout=30000)
         editor().locator('#toggle').wait_for(state='visible',timeout=30000)
-        editor().locator('#clickMode').select_option('toggle')
         wait_saved()
+        editor().locator('#clickMode').select_option('toggle')
     def wait_saved():
         deadline=time.monotonic()+30
         while time.monotonic()<deadline:
             with suppress(Exception):
-                if editor().locator('#image').get_attribute('data-pending-count')=='0' and editor().locator('#toggle').is_enabled():
-                    assert editor().locator('#image').evaluate('(c)=>[c.width,c.height]')==[1280,800]
-                    assert editor().locator('#original-image').evaluate('(c)=>[c.width,c.height]')==[1280,800]
+                state=editor().locator('#image').evaluate('''c=>{
+                    const o=document.getElementById('original-image');
+                    return {size:[c.width,c.height],original:[o.width,o.height],
+                        source:JSON.parse(c.dataset.sourceImage||'{}'),pending:c.dataset.pendingCount,
+                        ready:c.dataset.editorReady,disabled:document.getElementById('toggle').disabled};
+                }''',timeout=500)
+                if (state['pending']=='0' and state['ready']=='true' and not state['disabled']
+                        and state['source'].get('sha256')==expected_source
+                        and state['size']==state['original']==[1280,800]):
                     return
             time.sleep(.1)
-        raise AssertionError('Review did not finish saving.')
+        diagnostic=editor_diagnostics(page)
+        (output/'wait-failure.json').write_text(json.dumps(diagnostic,indent=2),encoding='utf-8')
+        raise AssertionError('Editor did not become ready: '+json.dumps(diagnostic))
     def color(x,y):
         return editor().locator('#image').evaluate(
             '(c,p)=>Array.from(c.getContext("2d").getImageData(p[0],p[1],1,1).data)',[x,y])[:3]
@@ -225,7 +283,7 @@ def interactions(browser, url, root, output):
         assert json.loads(archive.read('fiber_id_labels.json'))==before_labels
     page.screenshot(path=str(output/'review.png'),full_page=True)
     page.close()
-    page = browser.new_page(viewport={'width':1500,'height':1100})
+    page = new_analysis_page(browser,network_latency_ms)
     page.on('pageerror',lambda error: errors.append(str(error)))
     open_analysis()
     wait_color(50,35,False)
@@ -302,12 +360,14 @@ def interactions(browser, url, root, output):
     # A new image starts with no human overrides. Research exclusion is soft;
     # calibrated pixel reliability is a measurement gate, not a color toggle.
     synthetic_png(root/'range.png',variant=True)
-    page.locator('input[type=file]').first.set_input_files(str(root/'range.png'))
+    upload_image(root/'range.png')
     calibration=page.get_by_role('spinbutton',name='Calibration (µm/pixel)',exact=True)
     expect(calibration).to_have_value('',timeout=30000)
     calibration.fill('.5');calibration.press('Tab')
     page.get_by_text('Fiber selection and measurement eligibility',exact=True).click()
     page.get_by_text('Enable research-interest diameter range',exact=True).click()
+    expect(page.get_by_role('checkbox',name='Enable research-interest diameter range',exact=True)).to_be_checked()
+    assert float(calibration.input_value())==.5
     page.get_by_role('button',name='Analyze image',exact=True).click()
     wait_saved()
     wait_color(50,35,False)
@@ -341,6 +401,19 @@ def interactions(browser, url, root, output):
         '(c)=>Array.from(c.getContext("2d").getImageData(500,500,1,1).data)')==[80,80,80,255]
     page.screenshot(path=str(output/'selection-review.png'),full_page=True)
     print('Research range, manual override, pixel reliability gate and calibrated CSV fields passed',flush=True)
+    # Identical filenames/dimensions must still wait for the *new* decoded file,
+    # and must not inherit a different image's human labels or calibration.
+    renamed=root/'replacement'/'range.png'
+    renamed.parent.mkdir()
+    synthetic_png(renamed,variant=2)
+    upload_image(renamed)
+    expect(calibration).to_have_value('')
+    calibration.fill('.5');calibration.press('Tab')
+    page.get_by_role('button',name='Analyze image',exact=True).click()
+    wait_saved()
+    assert editor().locator('#image').get_attribute('data-reviewed-count')=='0'
+    assert_ids([])
+    print('Same-name image replacement verified by source hash',flush=True)
     page.get_by_text('Feedback learning, model evaluation and backups',exact=True).click()
     page.get_by_role('button',name='Retrain Model Using Corrections',exact=True).click()
     page.get_by_text('Each dataset role needs at least five explicitly reviewed accepted and five rejected examples.',
@@ -355,6 +428,7 @@ def interactions(browser, url, root, output):
                   left_accept_right_reject=True,keyboard_shortcuts=True,persistent_redo=True,
                   rapid_queue_exactly_once=True,failed_save_rollback=True,display_filters_only=True,review_progress=True,
                   research_range_filter=True,manual_range_override=True,reliability_gate=True,calibrated_csv_fields=True,
+                  uploaded_source_verified=True,same_name_replacement=True,network_latency_ms=network_latency_ms,
                   browser_errors=errors)
     (output/'report.json').write_text(json.dumps(report,indent=2),encoding='utf-8')
     print('Browser interaction checks passed',flush=True)
@@ -365,8 +439,12 @@ def main():
     parser.add_argument('--executable',type=Path)
     parser.add_argument('--python',default=sys.executable)
     parser.add_argument('--browser-executable')
+    parser.add_argument('--network-latency-ms',type=float,default=0,
+                        help='Add HTTP latency to exercise upload transitions; does not delay WebSocket saves.')
     parser.add_argument('--output-dir',type=Path,default=Path('feedback-browser-results'))
     args = parser.parse_args()
+    if not 0 <= args.network_latency_ms <= 10000:
+        parser.error('--network-latency-ms must be between 0 and 10000.')
     output = args.output_dir.resolve()
     output.mkdir(parents=True,exist_ok=True)
     project = Path(__file__).resolve().parents[1]
@@ -411,12 +489,13 @@ def main():
                         options['args'] = ['--no-sandbox']
                     browser = playwright.chromium.launch(**options)
                     try:
-                        interactions(browser,url,root,output)
+                        interactions(browser,url,root,output,network_latency_ms=args.network_latency_ms)
                     except Exception:
                         with suppress(Exception):
                             failed_page = browser.contexts[0].pages[-1]
                             failed_page.screenshot(path=str(output/'failure.png'),full_page=True)
                             (output/'failure-page.txt').write_text(failed_page.locator('body').inner_text(),encoding='utf-8')
+                            (output/'failure-editor.json').write_text(json.dumps(editor_diagnostics(failed_page),indent=2),encoding='utf-8')
                         raise
                     finally:
                         browser.close()
