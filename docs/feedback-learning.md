@@ -120,3 +120,16 @@ not find wholly missed fibers automatically. Manual outlines add those examples
 and preserve masks for future segmentation work; no U-Net/segmentation training is
 implemented. Assess missed detections, merges and measurement agreement separately
 against representative real microscopy images and ImageJ ground truth.
+
+## Developer browser check
+
+Install the optional ".[browser]" extra and an available Chrome/Chromium browser.
+Run "python tools/check_feedback_browser.py" for source, or add
+"--executable dist/CollagenFiberAnalyzer/CollagenFiberAnalyzer.exe" for a frozen
+build. "--browser-executable" can select a local Chromium binary. The check starts
+its own isolated server/database and uses generated synthetic pixels, never the
+operator's reviews. It exercises exact clicks, zoom mapping, outlines, CSV updates,
+restoration in a new browser session, persistent Undo and training prerequisites.
+Both native Windows build workflows run this check against the packaged executable
+before uploading the application artifact. Playwright is a developer-only extra;
+it and the test browser are not bundled as application dependencies.
