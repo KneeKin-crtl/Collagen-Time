@@ -6,7 +6,13 @@ package and continues to use PyInstaller's existing skimage hooks.
 """
 from PyInstaller.utils.hooks import collect_data_files, collect_submodules
 
-datas = collect_data_files('_skimage2', includes=['**/*.pyi'])
-hiddenimports = collect_submodules(
-    '_skimage2', filter=lambda name: '.tests' not in name and not name.endswith('.conftest')
-)
+datas = (collect_data_files('_skimage2', includes=['**/*.pyi', '**/*.npy'],
+                            excludes=['**/tests/**'])
+         + collect_data_files('skimage', includes=['**/*.pyi']))
+hiddenimports = [
+    name
+    for package in ('skimage', '_skimage2')
+    for name in collect_submodules(
+        package, filter=lambda name: '.tests' not in name and not name.endswith('.conftest')
+    )
+]
