@@ -34,7 +34,8 @@ jobs:
       - name: Verify interpreter
         run: python -c "import sys; assert sys.version_info[:3] == (3, 15, 2); print(sys.version)"
       - name: Install experimental dependencies
-        run: python -m pip install --only-binary=:all: -r requirements-python315.lock.txt -r packaging/windows/build-requirements-python315.txt
+        run: >-
+          python -m pip install --only-binary=:all: -r requirements-python315.lock.txt -r packaging/windows/build-requirements-python315.txt
       - name: Install application
         run: python -m pip install -e ".[dev]"
       - name: Check dependencies
