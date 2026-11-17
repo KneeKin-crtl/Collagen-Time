@@ -32,8 +32,8 @@ def display_rgb(image):
 def count_overlay(image, labels, table, opacity=.6):
     """Tint candidate pixels using the API's counting decisions, never the mask.
 
-    Background is unchanged. No IDs, centerlines or region rectangles are drawn
-    in this primary view; those remain available in the detailed annotation.
+    Background is unchanged. This is the color layer only; accepted fiber ID
+    callouts are composited separately for the primary view and exported images.
     Every label must have exactly one explicit API decision.
     """
     if not np.isfinite(opacity) or not 0 < opacity <= 1:
@@ -71,6 +71,7 @@ def count_overlay(image, labels, table, opacity=.6):
 
 
 def annotate(image, objects, exclusion_regions=()):
+    """Raw centerlines/regions; accepted ID callouts are a separate display layer."""
     gray = (normalize(image) * 255).astype(np.uint8)
     canvas = np.repeat(gray[..., None], 3, axis=2)
     for fiber_id, skeleton, centroid, accepted, *offsets in objects:
@@ -78,8 +79,6 @@ def annotate(image, objects, exclusion_regions=()):
         y0, x0 = offsets[0] if offsets else (0, 0)
         height, width = skeleton.shape
         canvas[y0:y0 + height, x0:x0 + width][skeleton] = color
-        y, x = centroid
-        cv2.putText(canvas, str(fiber_id), (int(x), int(y)), cv2.FONT_HERSHEY_SIMPLEX, .45, color, 1, cv2.LINE_AA)
     for left, top, right, bottom in exclusion_regions:
         cv2.rectangle(canvas, (left, top), (right - 1, bottom - 1), EXCLUDED_COLOR, 2)
     return canvas

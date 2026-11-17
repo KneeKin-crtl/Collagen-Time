@@ -15,6 +15,7 @@ from .pipeline import Analysis, DISTANCE_FIELDS
 from .preprocessing import normalize
 from .quality import classify
 from .visualization import COUNTED_COLOR, EXCLUDED_COLOR
+from .id_labels import fiber_id_layout, fiber_id_layer, composite_id_layer
 
 PIXEL_SETTINGS = ('segmentation', 'sigma_px', 'min_area_px', 'endpoint_exclusion_px',
                   'exclusion_regions_xyxy', 'exclusion_policy')
@@ -187,7 +188,8 @@ class ReviewSession:
                        manual_added_count=len(manuals),
                        accepted_mean_length_um=float(measured.length_um.mean()),
                        accepted_mean_diameter_um=float(measured.mean_diameter_um.mean()))
-        annotation = self.annotate(table, manuals)
+        id_labels = fiber_id_layout(labels, table)
+        annotation = composite_id_layer(self.annotate(table, manuals), fiber_id_layer(labels, id_labels))
         parameters = {**b.parameters, 'review': dict(analysis_key=self.analysis_key, image_key=self.image_key,
                       revision=self.revision, active_model=self.model['model_id'] if self.model else 'baseline',
                       history_event_ids=[int(o['state_event']) for o in self.objects if o['state_event']],
@@ -195,7 +197,7 @@ class ReviewSession:
                       dataset_role=self.store.image_role(self.image_key))}
         manual_masks = [(o['fiber_id'], o['bbox'], unpack_mask(o['mask'], o['bbox'])) for o in manuals]
         return Analysis(b.original, b.mask, labels, annotation, table, summary, parameters,
-                        baseline_labels=b.labels, manual_masks=manual_masks)
+                        baseline_labels=b.labels, manual_masks=manual_masks, id_labels=id_labels)
 
     def empty_table(self):
         table = self.baseline.table.copy()
@@ -214,16 +216,19 @@ class ReviewSession:
         colors = np.zeros((max([int(b.labels.max())] + table.fiber_id.tolist()) + 1, 3), np.uint8)
         for row in table.itertuples():
             colors[row.fiber_id] = COUNTED_COLOR if row.review_status == 'accepted' else EXCLUDED_COLOR
-        skeleton = np.any(b.annotated != b.annotated[...,:1], axis=2) & (b.labels > 0)
-        canvas[skeleton] = colors[b.labels[skeleton]]
+        if getattr(b,'centerlines',{}):
+            for fiber_id, yx in b.centerlines.items():
+                if len(yx):
+                    canvas[yx[:,0],yx[:,1]] = colors[fiber_id]
+        else:
+            # Compatibility for callers constructing an Analysis without the
+            # optional retained centerline coordinates.
+            skeleton = np.any(b.annotated != b.annotated[...,:1], axis=2) & (b.labels > 0)
+            canvas[skeleton] = colors[b.labels[skeleton]]
         for obj in manuals:
             xy = np.asarray(obj['measurement']['_centerline_xy'], int)
             if xy.size:
                 canvas[xy[:,1],xy[:,0]] = colors[obj['fiber_id']]
-        for row in table.itertuples():
-            if row.visible_in_overlay:
-                cv2.putText(canvas, str(row.fiber_id), (int(row.centroid_x), int(row.centroid_y)),
-                            cv2.FONT_HERSHEY_SIMPLEX, .45, tuple(map(int, colors[row.fiber_id])), 1, cv2.LINE_AA)
         for left,top,right,bottom in b.parameters['exclusion_regions_xyxy']:
             cv2.rectangle(canvas, (left,top), (right-1,bottom-1), EXCLUDED_COLOR, 2)
         return canvas

@@ -9,6 +9,7 @@ from .geometry import measure
 from .quality import classify, counted_candidates
 from .visualization import annotate
 from .exclusions import overlap_pixels, validate_regions
+from .id_labels import fiber_id_layout, fiber_id_layer, composite_id_layer
 
 COLUMNS = ["image_id", "fiber_id", "calibration_um_per_px", "area_px", "length_um", "mean_diameter_um", "diameter_sd_um", "diameter_samples", "endpoints", "border_touch", "crossing_merge", "review_status", "qc_flags", "diameter_method", "excluded_region", "exclusion_overlap_px"]
 DISTANCE_FIELDS = ['length', 'mean_diameter', 'diameter_sd']
@@ -26,6 +27,8 @@ class Analysis:
     parameters: dict = field(default_factory=dict)
     baseline_labels: np.ndarray | None = None
     manual_masks: list = field(default_factory=list)
+    centerlines: dict = field(default_factory=dict)
+    id_labels: list | None = None
 
 
 @dataclass
@@ -37,6 +40,7 @@ class PixelAnalysis:
     annotated: np.ndarray
     table: pd.DataFrame
     parameters: dict
+    centerlines: dict = field(default_factory=dict)
 
 
 def analyze_pixels(image, image_id="image", segmenter=None, sigma=0.0, min_area=20,
@@ -52,7 +56,7 @@ def analyze_pixels(image, image_id="image", segmenter=None, sigma=0.0, min_area=
     if mask.shape != gray.shape or mask.dtype != bool:
         raise ValueError("Segmenter must return a boolean mask at original resolution.")
     labels, regions = detect(mask)
-    rows, objects = [], []
+    rows, objects, centerlines = [], [], {}
     for region in regions:
         component = region.image
         y0, x0, y1, x1 = region.bbox
@@ -73,6 +77,9 @@ def analyze_pixels(image, image_id="image", segmenter=None, sigma=0.0, min_area=
                          qc_flags=';'.join(flags), diameter_method='2x_distance_transform_approximation',
                          excluded_region=bool(overlap), exclusion_overlap_px=overlap))
         objects.append((region.label, m['skeleton'], region.centroid, status == 'accepted', (y0, x0)))
+        # Retain existing geometry for display; never recover centerlines from
+        # a rendered image, where text could obscure or resemble skeleton pixels.
+        centerlines[int(region.label)] = np.argwhere(m['skeleton']).astype(np.int32) + np.asarray((y0,x0),np.int32)
     parameters = {
         'segmentation': asdict(segmenter) if isinstance(segmenter, ThresholdSegmenter) else {'type': type(segmenter).__name__},
         'sigma_px': float(sigma), 'min_area_px': int(min_area), 'endpoint_exclusion_px': float(exclusion_px),
@@ -80,7 +87,7 @@ def analyze_pixels(image, image_id="image", segmenter=None, sigma=0.0, min_area=
         'exclusion_policy': 'intersecting candidates retained and flagged; excluded from accepted statistics',
     }
     return PixelAnalysis(image, mask, labels, annotate(image, objects, regions_to_exclude),
-                         pd.DataFrame(rows, columns=PIXEL_COLUMNS), parameters)
+                         pd.DataFrame(rows, columns=PIXEL_COLUMNS), parameters, centerlines)
 
 
 def calibrate_analysis(pixels, calibration):
@@ -99,7 +106,10 @@ def calibrate_analysis(pixels, calibration):
                'accepted_mean_length_um': float(accepted.length_um.mean()),
                'accepted_mean_diameter_um': float(accepted.mean_diameter_um.mean())}
     parameters = {**pixels.parameters, 'calibration_um_per_px': float(calibration)}
-    return Analysis(pixels.original, pixels.mask, pixels.labels, pixels.annotated, table, summary, parameters)
+    id_labels = fiber_id_layout(pixels.labels, table)
+    annotated = composite_id_layer(pixels.annotated, fiber_id_layer(pixels.labels, id_labels))
+    return Analysis(pixels.original, pixels.mask, pixels.labels, annotated, table, summary, parameters,
+                    centerlines=getattr(pixels,'centerlines',{}), id_labels=id_labels)
 
 
 def analyze(image, calibration, image_id="image", segmenter=None, sigma=0.0, min_area=20,

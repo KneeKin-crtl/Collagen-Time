@@ -166,12 +166,18 @@ patcher.start()
         raise RuntimeError('Bundled UI measurement failed.')
     if len(app.main.get('component_instance')) != 1:
         raise RuntimeError('Bundled UI must provide one interactive primary counting overlay.')
+    import json
+    label_args=json.loads(app.main.get('component_instance')[0].proto.json_args)
+    if [item['fiber_id'] for item in label_args['fiber_id_labels']] != [1]:
+        raise RuntimeError('Bundled ID label must match the measured fiber ID.')
     editor = resource_root() / 'assets' / 'fiber_editor' / 'index.html'
     if not editor.is_file() or 'streamlit:setComponentValue' not in editor.read_text(encoding='utf-8'):
         raise RuntimeError('Bundled interactive review component is missing.')
     next(w for w in app.button if w.label == 'Mark rejected').click().run(timeout=60)
     if app.exception or app.dataframe[0].value.classification.tolist() != ['rejected']:
         raise RuntimeError('Bundled correction UI failed.')
+    if json.loads(app.main.get('component_instance')[0].proto.json_args)['fiber_id_labels']:
+        raise RuntimeError('Rejected fibers must not retain ID callouts.')
     next(w for w in app.button if w.label == 'Undo last correction').click().run(timeout=60)
     if app.exception or app.dataframe[0].value.classification.tolist() != ['accepted']:
         raise RuntimeError('Bundled correction Undo failed.')

@@ -8,6 +8,7 @@ from collagen.export import result_archive
 from collagen.pipeline import analyze
 from collagen.quality import counted_candidates
 from collagen.visualization import count_overlay, COUNTED_COLOR, EXCLUDED_COLOR
+from collagen.id_labels import composite_id_layer, fiber_id_layer
 
 
 def decisions(statuses=('accepted', 'review_required')):
@@ -84,7 +85,9 @@ def test_green_labels_match_final_count_and_all_qc_exclusions_are_red():
     assert set(result.table.loc[result.table.excluded_region, 'fiber_id']) <= set(red_ids)
     with zipfile.ZipFile(BytesIO(result_archive(result))) as z:
         exported = tifffile.imread(BytesIO(z.read('count_overlay.tiff')))
-        assert np.array_equal(exported, count_overlay(result.original, result.labels, result.table))
+        expected = composite_id_layer(count_overlay(result.original,result.labels,result.table),
+                                      fiber_id_layer(result.labels,result.id_labels))
+        assert np.array_equal(exported, expected)
 
 
 def test_empty_and_all_excluded_analyses():

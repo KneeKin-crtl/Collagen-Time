@@ -33,6 +33,16 @@ restores the original labels. No automatic splitting or edge guessing is done.
 
 ## Counts, measurements and exports
 
+The primary view and detailed annotation show plain black `fiber_id` numbers,
+without a background plate, at a default glyph height of 14 original pixels,
+only for rows included in the measurement count. Match the printed number to the
+`fiber_id` column of the CSV opened in Excel, not the spreadsheet row number.
+Rejected objects and green objects pending reliable measurements have no callout.
+Callouts prefer nearby background and avoid each other when space permits; dense
+areas may still overlap. Zoom or uncheck **Show accepted fiber IDs** to inspect
+boundaries. This display toggle does not save a correction, change a measurement,
+or remove IDs from downloaded annotated images.
+
 `accepted_count` is the number of green accepted objects. `accepted_measurement_count`
 and the legacy `accepted_isolated_count` count only accepted objects with positive,
 finite length/diameter and no border, crossing/merge or excluded-region flag.
@@ -57,6 +67,12 @@ and preserves `baseline_labels.tiff`. Manual cropped masks and their original-pi
 bounding boxes are in `manual_masks.npz` (read with `numpy.load(..., allow_pickle=False)`).
 Original images retain their resolution and bit depth. Calibration changes scale
 measurements without changing masks or review identity.
+The annotated TIFFs include the same ID layer as the primary view, and
+`fiber_id_labels.json` records the ID/image/anchor mapping. Accept/reject, Undo,
+calibration changes and reopening the same review never renumber unrelated objects.
+Reprocessing identical pixels/settings preserves the mapping; different segmentation
+or QC settings can produce different instances and IDs. Compare against the CSV from
+that same analysis. Automatic IDs are not automatically ImageJ's manual ROI numbers.
 
 ## Persistent storage and backup
 

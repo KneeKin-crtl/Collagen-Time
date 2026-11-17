@@ -24,6 +24,7 @@ input{vertical-align:middle}
  <button id="save" disabled>Save outline</button>
  <button id="clear">Clear outline</button>
  <button id="undo">Undo</button>
+ <label><input id="showIds" type="checkbox" checked> Show accepted fiber IDs</label>
  <label>Zoom <input aria-label="Zoom" id="zoom" type="range" min="50" max="800" value="100" step="25"> <span id="zoomLabel">100%</span></label>
 </div>
 <div id="viewport"><canvas id="image" aria-label="Interactive fiber classification image" tabindex="0"></canvas></div>
@@ -33,7 +34,7 @@ input{vertical-align:middle}
 'use strict';
 const canvas=document.getElementById('image'), ctx=canvas.getContext('2d');
 const viewport=document.getElementById('viewport'), zoom=document.getElementById('zoom');
-let args=null, image=null, mode='toggle', points=[], busy=false, lastSent=null, renderId=0, fit=1;
+let args=null, image=null, labelImage=null, mode='toggle', points=[], busy=false, lastSent=null, renderId=0, fit=1;
 let origin='*', down=null;
 function post(type, extra) {
   window.parent.postMessage(Object.assign({isStreamlitMessage:true,type:type},extra||{}),origin);
@@ -48,6 +49,8 @@ function draw() {
   if(!image)return;
   ctx.clearRect(0,0,canvas.width,canvas.height);
   ctx.drawImage(image,0,0);
+  canvas.dataset.idsVisible=String(document.getElementById('showIds').checked);
+  if(labelImage && document.getElementById('showIds').checked)ctx.drawImage(labelImage,0,0);
   if(points.length) {
     ctx.lineWidth=2/(fit*Number(zoom.value)/100);
     ctx.strokeStyle='#ffd43b';ctx.fillStyle='#ffd43b';ctx.beginPath();
@@ -93,6 +96,7 @@ document.getElementById('clear').onclick=function(){points=[];controls();draw();
 document.getElementById('save').onclick=function(){send('outline',{points:points});};
 document.getElementById('undo').onclick=function(){send('undo');};
 zoom.oninput=resize;
+document.getElementById('showIds').onchange=draw;
 canvas.onpointerdown=function(e){down={x:e.clientX,y:e.clientY};};
 canvas.onpointerup=function(e) {
   if(busy || !args || !down || Math.hypot(e.clientX-down.x,e.clientY-down.y)>5)return;
@@ -126,15 +130,30 @@ window.addEventListener('message',function(event){
   }
   if(!busy)status(args.message || (mode==='outline' ? 'Trace one fiber boundary, then Save outline.' : 'Click a highlighted object to toggle its classification. Zoom in for small objects.'));
   controls();
-  const id=++renderId, nextImage=new Image();
-  nextImage.onload=function(){
-    if(id!==renderId)return;
+  const id=++renderId, renderedArgs=args, nextImage=new Image(), nextLabels=new Image();
+  busy=true;controls();
+  let imageReady=false, labelsReady=!renderedArgs.labels_image;
+  function commitImages(){
+    if(id!==renderId || !imageReady || !labelsReady)return;
     const changed=!image || image.width!==nextImage.width || image.height!==nextImage.height;
-    image=nextImage;canvas.width=image.width;canvas.height=image.height;
+    image=nextImage;labelImage=renderedArgs.labels_image ? nextLabels : null;
+    canvas.width=image.width;canvas.height=image.height;
+    const labels=renderedArgs.fiber_id_labels || [];
+    canvas.dataset.fiberIds=JSON.stringify(labels.map(function(x){return x.fiber_id;}));
+    canvas.dataset.idLabels=JSON.stringify(labels);
     if(changed){canvas.style.width='';canvas.style.height='';}
+    busy=Boolean(lastSent);controls();
     resize();
-  };
-  nextImage.src=args.image;
+  }
+  function loadError(){
+    if(id!==renderId)return;
+    busy=true;controls();status('The image or ID layer could not load. Refresh before editing.');
+  }
+  nextImage.onload=function(){imageReady=true;commitImages();};
+  nextLabels.onload=function(){labelsReady=true;commitImages();};
+  nextImage.onerror=nextLabels.onerror=loadError;
+  nextImage.src=renderedArgs.image;
+  if(renderedArgs.labels_image)nextLabels.src=renderedArgs.labels_image;
 });
 window.addEventListener('resize',resize);
 post('streamlit:componentReady',{apiVersion:1});
