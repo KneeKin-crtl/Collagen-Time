@@ -11,6 +11,8 @@ It also updates Streamlit to 1.67.0, pandas to 3.1.1, PyArrow to 26.0.1,
 httptools to 0.9.0, and rpds-py to 2026.9.1 for compatible dependencies.
 The application permits pandas 3; the stable lock continues to pin pandas 2.
 Do not mix the stable and experimental lock files in one environment.
+The packaging hook retains the new scikit-image implementation's lazy imports
+and runtime `.pyi` files. It does not switch the app to the new skimage2 API.
 
 ## Run from source on Windows
 
