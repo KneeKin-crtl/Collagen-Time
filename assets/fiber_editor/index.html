@@ -15,6 +15,9 @@ button:disabled{opacity:.45;cursor:wait}
 h3{font-size:17px;margin:10px 0}
 .viewport{box-sizing:border-box;overflow:auto;width:100%;max-height:600px;border:1px solid #777;border-radius:5px;background:#121212}
 #original-image{cursor:default}
+.viewport{position:relative}
+#outline-preview{position:absolute;top:0;left:0;pointer-events:none}
+select{max-width:100%;font:inherit;color:var(--text);background:var(--surface);padding:5px}
 #original-note{margin:5px 0;font-size:12px}
 @media(max-width:760px){.results-grid{grid-template-columns:minmax(0,1fr)}}
 canvas{display:block;cursor:crosshair;touch-action:pan-x pan-y}
@@ -25,11 +28,18 @@ input{vertical-align:middle}
 </head>
 <body>
 <div class="tools">
- <button id="toggle" aria-pressed="true">Click to toggle</button>
+ <button id="toggle" aria-pressed="true">Review fibers</button>
  <button id="outline" aria-pressed="false">Outline missed / merged fiber</button>
  <button id="save" disabled>Save outline</button>
  <button id="clear">Clear outline</button>
+ <button id="accept">Accept selected (A)</button>
+ <button id="reject">Reject selected (R)</button>
+ <button id="next">Next unreviewed (N)</button>
  <button id="undo">Undo</button>
+ <button id="redo">Redo</button>
+ <label>Click mode <select id="clickMode" aria-label="Click mode"><option value="accept_reject">Left accept / right reject</option><option value="toggle">Left click toggles</option></select></label>
+ <label>Show <select id="viewMode" aria-label="Detection visibility"><option value="all">All detections</option><option value="hide_auto">Hide automatic exclusions</option><option value="review">Only requiring manual review</option></select></label>
+ <label><input id="shortcuts" type="checkbox" checked> Keyboard shortcuts</label>
  <label><input id="showIds" type="checkbox" checked> Show accepted fiber IDs</label>
  <label>Zoom <input aria-label="Zoom" id="zoom" type="range" min="50" max="800" value="100" step="25"> <span id="zoomLabel">100%</span></label>
 </div>
@@ -41,159 +51,13 @@ input{vertical-align:middle}
  </section>
  <section aria-labelledby="analysis-title">
   <h3 id="analysis-title">AI Fiber Analysis</h3>
-  <div id="viewport" class="viewport"><canvas id="image" aria-label="Interactive fiber classification image" tabindex="0"></canvas></div>
+  <div id="viewport" class="viewport"><canvas id="image" aria-label="Interactive fiber classification image" tabindex="0"></canvas><canvas id="outline-preview" aria-hidden="true"></canvas></div>
  </section>
 </div>
-<div id="status" role="status">Click a highlighted object to change only that object. Zoom in for small objects.</div>
-<div><span class="green">Green: accepted</span> · <span class="red">Red: rejected</span> · Measurements unavailable for ambiguous geometry remain flagged.</div>
-<script>
-'use strict';
-const canvas=document.getElementById('image'), ctx=canvas.getContext('2d');
-const viewport=document.getElementById('viewport'), zoom=document.getElementById('zoom');
-const originalCanvas=document.getElementById('original-image'), originalCtx=originalCanvas.getContext('2d');
-const originalViewport=document.getElementById('original-viewport');
-let args=null, image=null, originalImage=null, labelImage=null, mode='toggle', points=[], busy=false, lastSent=null, renderId=0, fit=1;
-let origin='*', down=null;
-function post(type, extra) {
-  window.parent.postMessage(Object.assign({isStreamlitMessage:true,type:type},extra||{}),origin);
-}
-function height() { post('streamlit:setFrameHeight',{height:document.body.scrollHeight+6}); }
-function controls() {
-  const disabled=busy || (args && args.review_enabled===false);
-  for(const id of ['toggle','outline','clear','undo']) document.getElementById(id).disabled=disabled;
-  document.getElementById('save').disabled=disabled || mode!=='outline' || points.length<3;
-}
-function status(text) { document.getElementById('status').textContent=text; }
-function draw() {
-  if(!image || !originalImage)return;
-  originalCtx.clearRect(0,0,originalCanvas.width,originalCanvas.height);
-  originalCtx.drawImage(originalImage,0,0);
-  ctx.clearRect(0,0,canvas.width,canvas.height);
-  ctx.drawImage(image,0,0);
-  canvas.dataset.idsVisible=String(document.getElementById('showIds').checked);
-  if(labelImage && document.getElementById('showIds').checked)ctx.drawImage(labelImage,0,0);
-  if(points.length) {
-    ctx.lineWidth=2/(fit*Number(zoom.value)/100);
-    ctx.strokeStyle='#ffd43b';ctx.fillStyle='#ffd43b';ctx.beginPath();
-    points.forEach(function(p,i){if(i===0)ctx.moveTo(p[0],p[1]);else ctx.lineTo(p[0],p[1]);});
-    ctx.stroke();
-    for(const p of points){ctx.beginPath();ctx.arc(p[0],p[1],3/(fit*Number(zoom.value)/100),0,2*Math.PI);ctx.fill();}
-  }
-}
-function resize() {
-  if(!image)return;
-  const oldScale=parseFloat(canvas.style.width)/canvas.width || fit;
-  const cx=(viewport.scrollLeft+viewport.clientWidth/2)/oldScale;
-  const cy=(viewport.scrollTop+viewport.clientHeight/2)/oldScale;
-  fit=Math.min(1,Math.max(1,Math.min(viewport.clientWidth,originalViewport.clientWidth)-2)/image.width);
-  const scale=fit*Number(zoom.value)/100;
-  for(const c of [canvas,originalCanvas]){
-    c.style.width=image.width*scale+'px';
-    c.style.height=image.height*scale+'px';
-  }
-  for(const v of [viewport,originalViewport])v.style.height=Math.min(600,image.height*fit+2)+'px';
-  viewport.scrollLeft=Math.max(0,cx*scale-viewport.clientWidth/2);
-  viewport.scrollTop=Math.max(0,cy*scale-viewport.clientHeight/2);
-  syncScroll(viewport,originalViewport);
-  document.getElementById('zoomLabel').textContent=zoom.value+'%';
-  draw();height();
-}
-function syncScroll(source,target){
-  if(Math.abs(source.scrollLeft-target.scrollLeft)>.5)target.scrollLeft=source.scrollLeft;
-  if(Math.abs(source.scrollTop-target.scrollTop)>.5)target.scrollTop=source.scrollTop;
-}
-viewport.onscroll=function(){syncScroll(viewport,originalViewport);};
-originalViewport.onscroll=function(){syncScroll(originalViewport,viewport);};
-function send(action, extra) {
-  if(busy || !args || args.review_enabled===false)return;
-  busy=true;
-  const token=window.crypto.randomUUID ? window.crypto.randomUUID() : Date.now()+'-'+Math.random();
-  lastSent=Object.assign({action:action,token:token,context:args.context},extra||{});
-  controls();status('Saving…');
-  post('streamlit:setComponentValue',{value:lastSent,dataType:'json'});
-}
-function setMode(value) {
-  if(busy || args.review_enabled===false)return;
-  mode=value;
-  document.getElementById('toggle').setAttribute('aria-pressed',String(mode==='toggle'));
-  document.getElementById('outline').setAttribute('aria-pressed',String(mode==='outline'));
-  status(mode==='outline' ? 'Click around one fiber boundary, then Save outline. Accepted overlaps must be rejected first. Backspace removes the last point.' : 'Click a highlighted object to toggle its classification. Background clicks do not select nearby fibers.');
-  controls();draw();
-}
-document.getElementById('toggle').onclick=function(){setMode('toggle');};
-document.getElementById('outline').onclick=function(){setMode('outline');};
-document.getElementById('clear').onclick=function(){points=[];controls();draw();};
-document.getElementById('save').onclick=function(){send('outline',{points:points});};
-document.getElementById('undo').onclick=function(){send('undo');};
-zoom.oninput=resize;
-document.getElementById('showIds').onchange=draw;
-canvas.onpointerdown=function(e){down={x:e.clientX,y:e.clientY};};
-canvas.onpointerup=function(e) {
-  if(busy || !args || args.review_enabled===false || !down || Math.hypot(e.clientX-down.x,e.clientY-down.y)>5)return;
-  down=null;
-  const r=canvas.getBoundingClientRect();
-  const x=(e.clientX-r.left)*canvas.width/r.width, y=(e.clientY-r.top)*canvas.height/r.height;
-  if(x<0 || y<0 || x>=canvas.width || y>=canvas.height)return;
-  if(mode==='outline'){
-    if(points.length>=512){status('Maximum 512 vertices. Save or clear this outline.');return;}
-    points.push([x,y]);controls();draw();
-  } else send('toggle',{x:x,y:y});
-};
-canvas.onkeydown=function(e){
-  if(e.key==='Backspace' && mode==='outline' && !busy && args.review_enabled!==false){e.preventDefault();points.pop();controls();draw();}
-  if((e.ctrlKey||e.metaKey) && e.key==='z'){e.preventDefault();send('undo');}
-};
-window.addEventListener('message',function(event){
-  if(event.source!==window.parent || !event.data || event.data.type!=='streamlit:render')return;
-  origin=event.origin;
-  args=event.data.args;
-  if(event.data.theme){
-    const theme=event.data.theme;
-    document.documentElement.style.setProperty('--text',theme.textColor);
-    document.documentElement.style.setProperty('--surface',theme.secondaryBackgroundColor);
-    document.documentElement.style.setProperty('--background',theme.backgroundColor);
-  }
-  if(lastSent && args.ack_token===lastSent.token){
-    busy=false;
-    if(lastSent.action==='outline' && args.event_ok)points=[];
-    lastSent=null;
-  }
-  if(!busy)status(args.message || (mode==='outline' ? 'Trace one fiber boundary, then Save outline.' : 'Click a highlighted object to toggle its classification. Zoom in for small objects.'));
-  controls();
-  const id=++renderId, renderedArgs=args, nextImage=new Image(), nextOriginal=new Image(), nextLabels=new Image();
-  busy=true;controls();
-  let imageReady=false, originalReady=false, labelsReady=!renderedArgs.labels_image;
-  function commitImages(){
-    if(id!==renderId || !imageReady || !originalReady || !labelsReady)return;
-    if(nextOriginal.width!==nextImage.width || nextOriginal.height!==nextImage.height){loadError();return;}
-    const changed=!image || image.width!==nextImage.width || image.height!==nextImage.height;
-    image=nextImage;originalImage=nextOriginal;labelImage=renderedArgs.labels_image ? nextLabels : null;
-    canvas.width=image.width;canvas.height=image.height;
-    originalCanvas.width=image.width;originalCanvas.height=image.height;
-    const note=document.getElementById('original-note');
-    note.textContent=renderedArgs.original_note || '';note.hidden=!note.textContent;
-    const labels=renderedArgs.fiber_id_labels || [];
-    canvas.dataset.fiberIds=JSON.stringify(labels.map(function(x){return x.fiber_id;}));
-    canvas.dataset.idLabels=JSON.stringify(labels);
-    if(changed){canvas.style.width='';canvas.style.height='';}
-    busy=Boolean(lastSent);controls();
-    resize();
-  }
-  function loadError(){
-    if(id!==renderId)return;
-    busy=true;controls();status('The original, analysis or ID layer could not load at matching dimensions. Refresh before editing.');
-  }
-  nextImage.onload=function(){imageReady=true;commitImages();};
-  nextOriginal.onload=function(){originalReady=true;commitImages();};
-  nextLabels.onload=function(){labelsReady=true;commitImages();};
-  nextImage.onerror=nextOriginal.onerror=nextLabels.onerror=loadError;
-  nextImage.src=renderedArgs.image;
-  nextOriginal.src=renderedArgs.original_image;
-  if(renderedArgs.labels_image)nextLabels.src=renderedArgs.labels_image;
-});
-window.addEventListener('resize',resize);
-post('streamlit:componentReady',{apiVersion:1});
-height();
-</script>
+<div id="review-progress" aria-live="polite"></div>
+<div id="selected">Select a colored object to inspect its category.</div>
+<div id="status" role="status">Left-click to accept, right-click to reject. Wait for all corrections to be saved before exporting or closing.</div>
+<div><span class="green">Green: accepted</span> · <span class="red">Red: excluded or manually rejected</span> · Measurements unavailable for ambiguous geometry remain flagged.</div>
+<script src="editor.js"></script>
 </body>
 </html>

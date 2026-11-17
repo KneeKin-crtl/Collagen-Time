@@ -1,35 +1,70 @@
 """Streamlit orchestration for persistent human review and experimental learning."""
 import sqlite3
+import uuid
 
 import pandas as pd
 import streamlit as st
 
-from .editor import fiber_editor, image_url, original_preview
+from .editor import fiber_editor, editor_assets, editor_objects, label_sprite
 from .export import csv_bytes
-from .feedback import FeedbackStore
+from .feedback import FeedbackStore, fingerprint, feedback_directory, image_identity
 from .learning import retrain
 from .review import ReviewSession
-from .visualization import count_overlay
-from .id_labels import fiber_id_layer
+from .id_labels import fiber_id_layout
+from .selection import select_baseline
 
 
-def comparison_editor(result, **kwargs):
+def comparison_editor(result, review=None, image_name='', **kwargs):
     """Keep both views tied to the exact source used by this analysis."""
-    original_image, original_note = original_preview(result.original)
-    return fiber_editor(original_image=original_image, original_note=original_note,
-                        image=image_url(count_overlay(result.original, result.labels, result.table)),
-                        labels_image=image_url(fiber_id_layer(result.labels, result.id_labels)),
+    assets = getattr(review,'editor_assets',None)
+    if assets is None:
+        assets = editor_assets(result)
+        if review is not None:
+            review.editor_assets = assets
+    if result.id_labels is None:
+        result.id_labels = fiber_id_layout(result.labels,result.table)
+    sprites = getattr(review,'sprite_cache',{})
+    for item in result.id_labels:
+        if item['fiber_id'] not in sprites:
+            sprites[item['fiber_id']] = label_sprite(result.labels,item)
+    asset_key = (fingerprint(review.analysis_key, review._mask_signature) if review is not None else
+                 fingerprint('baseline', image_identity(result.original), result.parameters))
+    acknowledged = st.session_state.get('editor_assets_ack-' + asset_key, {})
+    # Immutable layers are referenced after the browser acknowledges them. A
+    # cache miss requests them again; no image files or datasets are exposed.
+    payload = {} if acknowledged else assets
+    known_sprites = set(acknowledged.get('sprites', ()))
+    return fiber_editor(**payload, asset_key=asset_key, objects=editor_objects(result.table),
+                        source_image=dict(name=image_name or getattr(review,'image_name',''),
+                            sha256=result.parameters.get('source_sha256',''),
+                            width=int(result.original.shape[1]),height=int(result.original.shape[0])),
+                        review_progress=dict(total=len(result.table),
+                            reviewed=int(result.table.manual_classification.notna().sum()) if 'manual_classification' in result.table else 0),
+                        id_sprites=[sprites[item['fiber_id']] for item in result.id_labels
+                                    if sprites[item['fiber_id']]['sprite_key'] not in known_sprites],
                         fiber_id_labels=result.id_labels, **kwargs)
 
 
-def reviewed_results(baseline, image_name, source_sha):
+def reviewed_results(baseline, image_name, source_sha, filters=None):
     try:
-        store = FeedbackStore()
-        review = ReviewSession(baseline, store, image_name, source_sha)
+        cached = st.session_state.get('_active_review')
+        store = (cached.store if cached is not None and cached.store.directory == feedback_directory()
+                 else FeedbackStore())
+        if (cached is None or cached.baseline is not baseline or cached.image_name != image_name
+                or cached.store.path != store.path):
+            review = ReviewSession(baseline, store, image_name, source_sha, filters=filters, render=False)
+            st.session_state['_active_review'] = review
+        else:
+            review = cached
+            review.set_filters(filters)
+            if review.revision != store.revision:
+                review.refresh()
     except (OSError, sqlite3.Error, ValueError) as error:
         st.error(f'Manual review storage is unavailable: {error}. Baseline analysis remains available. Set COLLAGEN_FEEDBACK_DIR to a writable folder to enable saved review.')
+        if filters is not None:
+            baseline = select_baseline(baseline,filters)
         st.json(baseline.summary)
-        comparison_editor(baseline, review_enabled=False, key='baseline-comparison', default=None,
+        comparison_editor(baseline, image_name=image_name, review_enabled=False, key='baseline-comparison', default=None,
                           message='Baseline results; saved manual review is unavailable.')
         return baseline
 
@@ -51,8 +86,14 @@ def reviewed_results(baseline, image_name, source_sha):
     if notice:
         getattr(st, notice['level'])(notice['text'])
     model_name = review.model['model_id'][:12] if review.model else 'baseline rules'
-    st.caption(f'Object classifier: {model_name}. Click an object to toggle acceptance; background clicks do not select a neighboring object. Use the outline tool to add a missed fiber or isolate one from a rejected merged object.')
-    event = comparison_editor(result, context=review.context, ack_token=st.session_state.get(ack_key),
+    st.caption(f'Object classifier: {model_name}. Left-click to accept; right-click to reject. A/R accept/reject the selected object, N advances, Ctrl+Z undoes and Ctrl+Y redoes. Choose Toggle mode for the earlier click behavior. Background never selects a neighbor.')
+    client_key = 'review_client-' + key
+    if client_key not in st.session_state:
+        st.session_state[client_key] = uuid.uuid4().hex
+    event = comparison_editor(result, review=review, context=review.context,
+                         client_key=st.session_state[client_key], policy_key=review.context.rsplit(':',1)[-1] if filters else '',
+                         geometry_key=str(review._mask_signature),
+                         ack_token=st.session_state.get(ack_key),
                          event_ok=notice.get('level') == 'success', message=notice.get('text', ''),
                          key='fiber-editor-' + key, default=None)
     if event is not None and not isinstance(event, dict):
@@ -62,16 +103,37 @@ def reviewed_results(baseline, image_name, source_sha):
         if isinstance(event, dict):
             st.session_state[ack_key] = event.get('token')
         try:
-            selected = review.handle_event(event, role)
-            if event.get('action') in ('toggle', 'outline'):
+            asset_key = fingerprint(review.analysis_key, review._mask_signature)
+            if event.get('action') == 'request_assets':
+                if event.get('context') != review.context or not isinstance(event.get('token'),str):
+                    raise ValueError('Refresh image layers on the current review.')
+                st.session_state.pop('editor_assets_ack-' + asset_key, None)
+                selected = None
+            else:
+                if event.get('asset_key') == asset_key:
+                    known = event.get('known_sprites', [])
+                    valid = {sprite['sprite_key'] for sprite in review.sprite_cache.values()}
+                    st.session_state['editor_assets_ack-' + asset_key] = {
+                        'sprites':[key for key in known if isinstance(key,str) and key in valid] if isinstance(known,list) else []}
+                selected = review.handle_event(event, role)
+            if event.get('action') in ('toggle', 'accept', 'reject', 'outline'):
                 st.session_state['review-object-' + key] = int(selected)
-            st.session_state[notice_key] = dict(level='success', text='Correction saved.' if selected else 'Nothing to undo.')
+            message = ('Image layers restored.' if event.get('action') == 'request_assets' else
+                       'Correction saved.' if selected else 'Nothing to undo/redo.')
+            # Preview the quality gate without another image/geometry build.
+            if selected and event.get('action') == 'accept':
+                row = result.table.loc[result.table.fiber_id.eq(selected)].iloc[0]
+                if row.get('automatic_category') in ('too_small','ambiguous'):
+                    message = 'Human acceptance saved; measurements remain excluded: ' + row.get('exclusion_reason','unreliable geometry')
+            st.session_state[notice_key] = dict(level='success', text=message)
         except (ValueError, sqlite3.Error, OSError) as error:
             st.session_state[notice_key] = dict(level='warning', text=str(error))
         st.rerun()
 
-    st.caption(f"Green: {result.summary['accepted_count']} accepted objects · Red: {result.summary['review_required_count']} rejected candidates · Measurable accepted fibers: {result.summary['accepted_measurement_count']}. Accepted objects with unavailable or partial geometry stay out of measurement statistics.")
+    st.caption(f"Green: {result.summary['accepted_measurement_count']} selected measurable fibers · Red: {result.summary['review_required_count']} excluded detections. Automatic exclusions and manual rejections have separate categories and reasons in the table and CSV. Detections and raw measurements are retained.")
     st.caption('Black ID labels identify only measurable accepted fibers and match fiber_id in the CSV opened in Excel. Zoom for dense areas, or hide IDs to inspect boundaries. Click the colored fiber itself to change its review decision.')
+    if result.summary.get('manual_accepted_but_ineligible_count',0):
+        st.warning('Some objects you marked as real fibers still fail measurement eligibility and remain red. Inspect their exclusion reasons, adjust the selection thresholds, or outline a separated fiber. A review label cannot create missing or reliable geometry.')
     if result.summary['accepted_pending_measurement_count']:
         st.warning('Some accepted objects cannot provide reliable complete measurements. Their original QC flags are retained. Outline a separated individual fiber if appropriate; accepting a merged or truncated object does not reconstruct its missing centerline.')
 
@@ -82,14 +144,15 @@ def reviewed_results(baseline, image_name, source_sha):
             st.session_state.pop(selected_key, None)
         selected = st.selectbox('Object ID', ids, key=selected_key, disabled=not ids)
         st.caption('Use these buttons to confirm an already correct decision as a reviewed training/evaluation example. A click toggle also saves a reviewed example. Each object is one detected mask; connected fibers may share a mask until individually outlined.')
-        columns = st.columns(3)
+        columns = st.columns(4)
         accept = columns[0].button('Mark accepted', disabled=not ids)
         reject = columns[1].button('Mark rejected', disabled=not ids)
         undo = columns[2].button('Undo last correction')
-        if accept or reject or undo:
+        redo = columns[3].button('Redo last correction')
+        if accept or reject or undo or redo:
             try:
-                if undo:
-                    changed = store.undo(key, review.revision)
+                if undo or redo:
+                    changed = getattr(store,'undo' if undo else 'redo')(key, review.revision)
                 else:
                     changed = review.correct(int(selected), 'accepted' if accept else 'rejected', role)
                 st.session_state[notice_key] = dict(level='success', text='Correction saved.' if changed else 'Nothing to undo.')

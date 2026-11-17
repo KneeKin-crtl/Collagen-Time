@@ -5,6 +5,7 @@ import numpy as np
 import tifffile
 from .visualization import count_overlay
 from .id_labels import fiber_id_layout, fiber_id_layer, composite_id_layer
+from .pipeline import ensure_annotation
 
 
 def csv_bytes(table):
@@ -13,6 +14,7 @@ def csv_bytes(table):
 
 def result_archive(result):
     output = BytesIO()
+    ensure_annotation(result)
     id_labels = result.id_labels if result.id_labels is not None else fiber_id_layout(result.labels, result.table)
     labeled_overlay = composite_id_layer(count_overlay(result.original,result.labels,result.table),
                                          fiber_id_layer(result.labels,id_labels))

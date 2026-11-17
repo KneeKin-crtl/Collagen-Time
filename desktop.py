@@ -176,7 +176,8 @@ patcher.start()
     if [item['fiber_id'] for item in label_args['fiber_id_labels']] != [1]:
         raise RuntimeError('Bundled ID label must match the measured fiber ID.')
     editor = resource_root() / 'assets' / 'fiber_editor' / 'index.html'
-    if not editor.is_file() or 'streamlit:setComponentValue' not in editor.read_text(encoding='utf-8'):
+    script = editor.with_name('editor.js')
+    if not editor.is_file() or not script.is_file() or 'streamlit:setComponentValue' not in script.read_text(encoding='utf-8'):
         raise RuntimeError('Bundled interactive review component is missing.')
     next(w for w in app.button if w.label == 'Mark rejected').click().run(timeout=60)
     if app.exception or app.dataframe[0].value.classification.tolist() != ['rejected']:

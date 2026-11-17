@@ -12,11 +12,15 @@ that every connected component is one fiber.
 2. Before the first correction, choose **Training examples** or **Evaluation only**
    for the whole image. Keep at least two independent images for evaluation. This
    role locks after the first saved review and cannot be switched later.
-3. Click directly on a highlighted object to toggle accepted (green) / rejected
-   (red). Zoom and scroll the primary view for small objects. Only the label at
-   the original-pixel click is selected; a background click does nothing.
+3. Left-click a highlighted object to accept; right-click to reject. Select
+   **Left click toggles** to use the earlier interaction. A/R act on the selected
+   object, N advances to the next unreviewed object. Shortcuts require image focus
+   and can be disabled. Only the label at the original-pixel click is selected.
 4. Use **Undo** on the image, Ctrl+Z while the image has focus, or **Undo last
-   correction** in the object-ID controls. Undo survives closing the application.
+   correction** in the object-ID controls. Redo/Ctrl+Y restores the same action,
+   mask and ID; a new correction clears the redo branch without deleting history.
+   Both Undo and Redo survive reopening. Wait for **All corrections saved** before
+   closing or exporting; rapid clicks are queued with provisional local colors.
 5. Use **Review by object ID and save confirmations** to accept/reject a specific
    ID, including confirming an already correct automatic decision. Confirmations
    are important: corrections alone overrepresent difficult examples.
@@ -37,20 +41,23 @@ The primary view and detailed annotation show plain black `fiber_id` numbers,
 without a background plate, at a default glyph height of 14 original pixels,
 only for rows included in the measurement count. Match the printed number to the
 `fiber_id` column of the CSV opened in Excel, not the spreadsheet row number.
-Rejected objects and green objects pending reliable measurements have no callout.
+Excluded objects have no callout. A manual acceptance that fails measurement
+eligibility remains red, with the human decision retained separately.
 Callouts prefer nearby background and avoid each other when space permits; dense
 areas may still overlap. Zoom or uncheck **Show accepted fiber IDs** to inspect
 boundaries. This display toggle does not save a correction, change a measurement,
 or remove IDs from downloaded annotated images.
 
-`accepted_count` is the number of green accepted objects. `accepted_measurement_count`
-and the legacy `accepted_isolated_count` count only accepted objects with positive,
-finite length/diameter and no border, crossing/merge or excluded-region flag.
-`accepted_pending_measurement_count` reports the difference. A manual acceptance
-cannot reconstruct an ambiguous centerline or the missing end of a truncated fiber.
-Such rows retain their original flags and unavailable/partial measurements; they
-do not enter mean measurements or ImageJ error statistics. An accurate individual
-outline may resolve a merged mask, but its quality depends on the operator.
+The website uses [calibrated selection filters](fiber-selection.md): `accepted_count`
+and `accepted_measurement_count` count selected measurable green fibers.
+`accepted_isolated_count` excludes border-truncated partial fibers. Border objects
+are excluded by default; explicitly disabling that filter permits flagged partial
+lengths and reports `partial_length_included_count`. Crossings with missing geometry
+cannot enter measurements. `manual_accepted_but_ineligible_count` identifies human
+acceptances that remain excluded. A manual label cannot reconstruct a missing
+centerline or endpoint. An accurate outline may resolve a merged mask, but its
+quality depends on the operator. Direct Python callers without `SelectionFilters`
+retain the earlier review/count policy for backward compatibility.
 
 Existing measurements are reused when classifications change. Manual outlines use
 the same geometry function and calibration. Full per-fiber CSV exports include
@@ -61,6 +68,11 @@ versions, object/analysis keys, original-pixel bounding boxes, review-event IDs,
 `included_in_measurement_statistics` and overlay visibility. Rejected detections
 and fully covered originals remain in the full CSV. Use **Download measurable
 accepted fibers CSV** for the accepted measurement dataset.
+The website also exports selection categories, automatic and final exclusion
+reasons, calibrated area, mean width in pixels, diameter/SD in nm, and filter
+thresholds. Research filters do not generate training labels: only explicit human
+acceptance/rejection does. Use range filters for research selection rather than
+labeling every real out-of-range fiber as a non-fiber training example.
 
 The QC archive retains the original binary segmentation, adds the reviewed labels,
 and preserves `baseline_labels.tiff`. Manual cropped masks and their original-pixel
@@ -84,11 +96,14 @@ downloaded source or executable directory. Linux uses
 another writable location; for cloud development use a directory outside the
 checkout, such as `/workspace/collagen-feedback`.
 
-SQLite transactions save each correction immediately. The database contains
+SQLite transactions persist each acknowledged correction. The database contains
 original image pixels, exact cropped object masks, locations, initial automatic
-decisions/model versions, append-only correction and Undo events, current labels,
+decisions/model versions, append-only correction and Undo/Redo events, current labels,
 and immutable training/evaluation membership per model version. No credentials,
 network service, GPU, or third-party model download is needed.
+An additive database migration preserves old reviews and adds the calibration,
+selection settings and selection reason active when each new correction was made.
+Undo/Redo retain that original context. Existing training/model gates are unchanged.
 
 Re-upload the same original with the same segmentation/QC settings to restore
 corrections. Identity uses decoded pixel content, shape, dtype and analysis

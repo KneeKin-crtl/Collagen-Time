@@ -58,12 +58,25 @@ without annotations, resizing or contrast changes. Other TIFF pixel types requir
 a labeled browser display conversion; the original analysis/download pixels remain intact.
 
 The analysis view is an interactive, full-resolution overlay on the original:
-**green** marks accepted objects and **red** marks rejected candidates. Click an
-object to toggle it, zoom in for precision, and use Undo to reverse a correction.
-Colors follow the final API decision, including manual overrides. Background
-clicks do not snap to nearby objects. Green does not guarantee measurable geometry:
-accepted objects with unavailable or partial measurements are reported separately
-and excluded from measurement aggregates. See [manual review and learning](docs/feedback-learning.md).
+**green** marks selected measurable fibers and **red** marks excluded detections,
+with automatic exclusions distinguished from manual rejection in the table.
+Left-click to accept, right-click to reject; choose **Left click toggles** for the
+earlier behavior. A/R accept/reject the selected object; N advances through
+unreviewed objects. Undo/Redo and Ctrl+Z/Ctrl+Y preserve history. Enable/disable
+keyboard shortcuts in the editor. Background clicks never select nearby objects.
+
+Under **Fiber selection and measurement eligibility**, configure optional diameter
+range (150–335 nm initially, **disabled by default**), minimum length in µm, area in
+µm², mean width in pixels, border exclusion, and crossing review/exclusion.
+The three-pixel default mean-width screen is configurable and does not establish
+optical resolution. All detections, raw measurements and QC flags remain available.
+See [selection, review controls and performance](docs/fiber-selection.md) and
+[manual review and learning](docs/feedback-learning.md).
+
+Color changes are local and provisional until acknowledged by the saved review.
+The editor queues rapid corrections and restores confirmed decisions on a failed
+save. Wait for **All corrections saved** before exporting, switching images or
+closing. Changing filters never reruns segmentation or centerline measurement.
 
 Plain black ID labels with no background label **only measurable accepted fibers**, using the
 exact `fiber_id` exported in the Excel-readable CSV. Labels prefer background beside

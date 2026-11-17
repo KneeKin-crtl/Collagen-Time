@@ -82,3 +82,16 @@ def annotate(image, objects, exclusion_regions=()):
     for left, top, right, bottom in exclusion_regions:
         cv2.rectangle(canvas, (left, top), (right - 1, bottom - 1), EXCLUDED_COLOR, 2)
     return canvas
+
+
+def centerline_annotation(image, table, centerlines, exclusion_regions=()):
+    """Render retained coordinates without redoing skeletons or diameter sampling."""
+    gray = (normalize(image) * 255).astype(np.uint8)
+    canvas = np.repeat(gray[..., None], 3, axis=2)
+    for row in table.itertuples():
+        yx = np.asarray(centerlines.get(row.fiber_id, ()), np.int32)
+        if yx.size:
+            canvas[yx[:,0],yx[:,1]] = COUNTED_COLOR if row.review_status == 'accepted' else EXCLUDED_COLOR
+    for left, top, right, bottom in exclusion_regions:
+        cv2.rectangle(canvas, (left,top), (right-1,bottom-1), EXCLUDED_COLOR, 2)
+    return canvas

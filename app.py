@@ -4,7 +4,7 @@ import streamlit as st
 from skimage.color import label2rgb
 from collagen.preprocessing import normalize
 from collagen.loading import load_image
-from collagen.pipeline import analyze_pixels, calibrate_analysis
+from collagen.pipeline import analyze_pixels, calibrate_analysis, ensure_annotation
 from collagen.segmentation import ThresholdSegmenter
 from collagen.exclusions import suggest_scale_bar_region, validate_regions
 from collagen.export import csv_bytes, result_archive
@@ -13,6 +13,7 @@ from collagen.workbook import import_workbook, workbook_summary, image_manifest
 from collagen.resources import asset_path
 from collagen.visualization import count_overlay, display_rgb
 from collagen.review_ui import reviewed_results
+from collagen.selection import SelectionFilters
 
 
 @st.cache_data(show_spinner=False, max_entries=2)
@@ -41,6 +42,8 @@ if upload is not None:
     image_key = hashlib.sha256(data).hexdigest() + ':' + upload.name
     try:
         image, proposal = load_preview(data, upload.name)
+        with st.container(key='loaded-image-' + image_key.split(':',1)[0]):
+            st.caption(f'Loaded image: {upload.name} · {image.shape[1]} × {image.shape[0]} pixels')
     except ValueError as error:
         st.error(str(error))
 if st.session_state.get('request', {}).get('image_key') != image_key:
@@ -61,6 +64,17 @@ with st.sidebar:
         closing = st.number_input('Closing radius (pixels)', 0, 10, 0)
         min_area = st.number_input('Minimum accepted area (pixels)', 1, value=20)
         exclusion = st.number_input('Endpoint/junction exclusion (pixels)', 0.0, value=2.0)
+        with st.expander('Fiber selection and measurement eligibility', expanded=False):
+            research_range = st.checkbox('Enable research-interest diameter range', value=False)
+            min_diameter_nm = st.number_input('Minimum fiber diameter (nm)', min_value=0., value=150.)
+            max_diameter_nm = st.number_input('Maximum fiber diameter (nm)', min_value=0., value=335.)
+            min_length_um = st.number_input('Minimum fiber length (µm)', min_value=0., value=0.)
+            min_area_um2 = st.number_input('Minimum component area (µm²)', min_value=0., value=0., format='%.6f')
+            min_width_px = st.number_input('Minimum reliable mean width (pixels)', min_value=0., value=3.)
+            exclude_border = st.checkbox('Exclude border-truncated fibers from measurements', value=True)
+            crossing_policy = st.selectbox('Crossing / merged candidates', ['review','exclude'],
+                format_func=lambda value: 'Require manual review' if value == 'review' else 'Automatically exclude; retain for audit')
+            st.caption('Filters retain every detection. Diameter range is optional and is not a definition of a valid fiber. Area uses µm², not diameter. Width screening uses mean distance-transform diameter / calibration; it does not prove optical resolution. Unchecking border exclusion permits flagged partial lengths. Crossing/merged objects with missing geometry cannot contribute measurements.')
         exclude_region = False
         scale_review = 'no_proposal'
         rectangle = None
@@ -96,8 +110,11 @@ if submitted:
                         block_size=int(block), opening_radius=int(opening), closing_radius=int(closing)),
                         sigma=sigma, min_area=int(min_area), exclusion_px=exclusion,
                         exclusion_regions=regions)
+        filters = SelectionFilters(research_range_enabled=research_range, min_diameter_nm=min_diameter_nm,
+                    max_diameter_nm=max_diameter_nm, min_length_um=min_length_um, min_area_um2=min_area_um2,
+                    min_width_px=min_width_px, exclude_border=exclude_border, crossing_policy=crossing_policy)
         request = dict(image_key=image_key, calibration=calibration, settings=settings,
-                       scale_bar_review=scale_review)
+                       scale_bar_review=scale_review, selection_filters=filters.parameters())
         if st.session_state.get('request') != request:
             st.session_state.pop('archive', None)
         st.session_state['request'] = request
@@ -109,13 +126,20 @@ if submitted:
 request = st.session_state.get('request')
 if request is not None and image is not None and request['image_key'] == image_key:
     try:
-        with st.spinner('Analyzing image…'):
-            pixels = cached_pixels(data, upload.name, request['settings'])
-            result = calibrate_analysis(pixels, request['calibration'])
+        baseline_request = {k:request[k] for k in ('image_key','calibration','settings')}
+        if st.session_state.get('_baseline_request') != baseline_request:
+            with st.spinner('Analyzing image…'):
+                pixels = cached_pixels(data, upload.name, request['settings'])
+                st.session_state['_baseline'] = calibrate_analysis(pixels, request['calibration'], render=False)
+                st.session_state['_baseline_request'] = baseline_request
+        result = st.session_state['_baseline']
         result.parameters.update(source_sha256=hashlib.sha256(data).hexdigest(),
                                  calibration_source='entered by operator for this original image',
                                  scale_bar_review=request['scale_bar_review'])
-        result = reviewed_results(result, upload.name, hashlib.sha256(data).hexdigest())
+        filters = SelectionFilters(**request.get('selection_filters', {}))
+        if filters.research_range_enabled and filters.min_diameter_nm / (request['calibration']*1000) < filters.min_width_px:
+            st.warning('Part of the selected diameter range is below your configured reliable mean width in pixels. These dimensions may be unresolved; a range filter cannot establish measurement accuracy.')
+        result = reviewed_results(result, upload.name, hashlib.sha256(data).hexdigest(), filters=filters)
         details = st.expander('View Detailed Fiber Analysis', expanded=False,
                               key='fiber_details', on_change='rerun')
         if details.open:
@@ -124,7 +148,7 @@ if request is not None and image is not None and request['image_key'] == image_k
                 cols[0].image(display_rgb(image), caption='Original (unchanged resolution)')
                 cols[1].image(result.mask.astype('uint8') * 255, caption='Segmentation mask (excluded candidates retained)')
                 cols[0].image(label2rgb(result.labels, bg_label=0), caption='Labeled candidates')
-                cols[1].image(result.annotated, caption='Measured accepted fiber IDs and centerlines; rejected or unmeasurable objects have no ID label')
+                cols[1].image(ensure_annotation(result), caption='Measured accepted fiber IDs and centerlines; rejected or unmeasurable objects have no ID label')
         st.dataframe(result.table, hide_index=True)
         st.download_button('Download per-fiber CSV', csv_bytes(result.table), 'fibers.csv', 'text/csv')
         if 'included_in_measurement_statistics' in result.table:

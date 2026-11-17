@@ -30,7 +30,7 @@ def _intersection(a, b):
     return max(0, min(a[2],b[2])-max(a[0],b[0])) * max(0, min(a[3],b[3])-max(a[1],b[1]))
 
 
-def fiber_id_layout(labels, table):
+def fiber_id_layout(labels, table, reserved=()):
     """Return deterministic callouts for measurable accepted rows only.
 
     Prefer background beside the fiber, penalize label overlap, and anchor each
@@ -52,6 +52,12 @@ def fiber_id_layout(labels, table):
         x0,y0,x1,y1 = rect
         return ((x,y) for x in range(x0//cell,(x1-1)//cell+1)
                 for y in range(y0//cell,(y1-1)//cell+1))
+
+    for item in reserved:
+        x0,y0,x1,y1 = item['box_xyxy']
+        padded = (max(0,x0-1),max(0,y0-1),min(width,x1+1),min(height,y1+1))
+        for key in cells(padded):
+            occupied.setdefault(key,[]).append(padded)
 
     for row in rows.to_dict('records'):
         fiber_id = int(row['fiber_id'])

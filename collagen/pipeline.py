@@ -90,7 +90,7 @@ def analyze_pixels(image, image_id="image", segmenter=None, sigma=0.0, min_area=
                          pd.DataFrame(rows, columns=PIXEL_COLUMNS), parameters, centerlines)
 
 
-def calibrate_analysis(pixels, calibration):
+def calibrate_analysis(pixels, calibration, render=True):
     """Convert distances only; do not rerun segmentation or alter pixel geometry."""
     if calibration is None or not np.isfinite(calibration) or calibration <= 0:
         raise ValueError('Enter a verified, finite, positive calibration in µm/pixel.')
@@ -106,10 +106,22 @@ def calibrate_analysis(pixels, calibration):
                'accepted_mean_length_um': float(accepted.length_um.mean()),
                'accepted_mean_diameter_um': float(accepted.mean_diameter_um.mean())}
     parameters = {**pixels.parameters, 'calibration_um_per_px': float(calibration)}
-    id_labels = fiber_id_layout(pixels.labels, table)
-    annotated = composite_id_layer(pixels.annotated, fiber_id_layer(pixels.labels, id_labels))
+    id_labels = fiber_id_layout(pixels.labels, table) if render else None
+    annotated = composite_id_layer(pixels.annotated, fiber_id_layer(pixels.labels, id_labels)) if render else None
     return Analysis(pixels.original, pixels.mask, pixels.labels, annotated, table, summary, parameters,
                     centerlines=getattr(pixels,'centerlines',{}), id_labels=id_labels)
+
+
+def ensure_annotation(result):
+    """Materialize detailed display pixels only when shown or exported."""
+    if result.id_labels is None:
+        result.id_labels = fiber_id_layout(result.labels, result.table)
+    if result.annotated is None:
+        from .visualization import centerline_annotation
+        image = centerline_annotation(result.original, result.table, result.centerlines,
+                                      result.parameters.get('exclusion_regions_xyxy', ()))
+        result.annotated = composite_id_layer(image, fiber_id_layer(result.labels, result.id_labels))
+    return result.annotated
 
 
 def analyze(image, calibration, image_id="image", segmenter=None, sigma=0.0, min_area=20,
