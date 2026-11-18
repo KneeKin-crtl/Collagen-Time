@@ -3,7 +3,7 @@ name: Experimental Python 3.15
 on:
   workflow_dispatch:
   push:
-    branches: ['python315-compatibility', 'interactive-fiber-feedback', 'accepted-fiber-id-labels', 'compare-original-analysis', 'fiber-selection-review-speed', 'fix-editor-image-transition', 'fix-review-overlay-feedback']
+    branches: ['python315-compatibility', 'interactive-fiber-feedback', 'accepted-fiber-id-labels', 'compare-original-analysis', 'fiber-selection-review-speed', 'fix-editor-image-transition', 'fix-review-overlay-feedback', 'fix-left-click-approval']
   pull_request:
     paths:
       - 'requirements-python315.lock.txt'

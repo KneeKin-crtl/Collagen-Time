@@ -43,6 +43,13 @@ only for rows included in the measurement count. Match the printed number to the
 `fiber_id` column of the CSV opened in Excel, not the spreadsheet row number.
 Excluded objects have no callout. A manual acceptance that fails measurement
 eligibility remains red, with the human decision retained separately.
+The editor explicitly shows **human label accepted; NOT counted** when this
+happens. Missing length/diameter, reliable-sample availability and the number of
+endpoints explain an ambiguous mask. **Outline selected fiber** focuses the
+selected object and starts the existing outline tool. Save one correctly traced
+boundary to create a new measured ID and return to review mode. The original ID,
+mask, QC flags and correction history are retained; no missing measurement is
+filled merely to turn an object green.
 Callouts prefer nearby background and avoid each other when space permits; dense
 areas may still overlap. Zoom or uncheck **Show accepted fiber IDs** to inspect
 boundaries. This display toggle does not save a correction, change a measurement,

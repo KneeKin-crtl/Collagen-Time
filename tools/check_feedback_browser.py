@@ -62,10 +62,16 @@ def new_analysis_page(browser, network_latency_ms=0):
     return page
 
 
-def synthetic_png(path, variant=False, high_ids=False):
+def synthetic_png(path, variant=False, high_ids=False, crossing=False):
     # Mid-gray microscopy-like background makes plain black ID glyphs visible.
     # Larger than either result column: exercise fit-to-width and source mapping.
     rows = [bytearray([80]*1280) for _ in range(800)]
+    if crossing:
+        for y in range(200,211):
+            rows[y][300:601]=bytes([200])*301
+        for x in (330,370,410,450,490,530):
+            for y in range(150,251):
+                rows[y][x:x+5]=bytes([200])*5
     if high_ids:
         # Real connected-component numbering above one byte, including the
         # reported ID 1855. Tiny isolated components stay excluded and retained.
@@ -503,6 +509,51 @@ def interactions(browser, url, root, output, network_latency_ms=0):
     expect(editor().locator('#reject')).to_be_disabled()
     assert states()==before_states
     print('High-ID toolbar accept/reject, confirmed repaint, visible pixels, stable measurements and exact target passed',flush=True)
+    # A real human label cannot fill missing measurements. Reproduce a mask
+    # with 14 endpoints, show why it is excluded, and use the existing outline
+    # method to resolve one fiber without changing the original geometry.
+    synthetic_png(root/'crossing.png',crossing=True)
+    upload_image(root/'crossing.png')
+    expect(calibration).to_have_value('')
+    calibration.fill('.5');calibration.press('Tab')
+    page.get_by_role('button',name='Analyze image',exact=True).click()
+    wait_saved()
+    assert_ids([1,2])
+    click(310,205)
+    wait_saved()
+    assert color(310,205)[0]>color(310,205)[1]
+    expect(editor().locator('#selected')).to_contain_text('human label accepted; NOT counted')
+    expect(editor().locator('#selected')).to_contain_text('14 endpoints')
+    expect(editor().locator('#selected')).to_contain_text('Length / Diameter unavailable')
+    expect(editor().locator('#review-progress')).to_contain_text('Selected measurable fibers: 2')
+    expect(editor().locator('#resolve')).to_be_visible()
+    blocked_rows=export_rows('blocked-approval.csv')
+    assert blocked_rows[3]['manual_classification']=='accepted'
+    assert blocked_rows[3]['included_in_measurement_statistics']=='False'
+    assert blocked_rows[3]['length_um']==blocked_rows[3]['mean_diameter_um']==''
+    editor().get_by_role('button',name='Outline selected fiber',exact=True).click()
+    for point in ((300,200),(600,200),(600,210),(300,210)):
+        click(*point)
+    editor().get_by_role('button',name='Save outline',exact=True).click()
+    wait_color(310,205,True)
+    assert_ids([1,2,5])
+    expect(editor().locator('#toggle')).to_have_attribute('aria-pressed','true')
+    expect(editor().locator('#selected')).to_contain_text('Fiber 5: accepted')
+    expect(editor().locator('#resolve')).to_be_hidden()
+    for _ in range(3):
+        click(310,205,button='right');wait_color(310,205,False)
+        assert_ids([1,2])
+        click(310,205);wait_color(310,205,True)
+        assert_ids([1,2,5])
+        assert color(50,35)[1]>color(50,35)[0] and color(50,75)[1]>color(50,75)[0]
+    resolved_rows=export_rows('resolved-approval.csv')
+    assert resolved_rows[3]['included_in_measurement_statistics']=='False'
+    assert resolved_rows[3]['length_um']==resolved_rows[3]['mean_diameter_um']==''
+    assert resolved_rows[4]['included_in_measurement_statistics']=='True'
+    assert resolved_rows[4]['object_source']=='manual'
+    assert float(resolved_rows[4]['length_um'])>0 and float(resolved_rows[4]['mean_diameter_um'])>0
+    assert color(330,160)[0]>color(330,160)[1], 'Outline must not approve the entire connected crossing.'
+    print('Missing-geometry diagnosis, selected-fiber outline, repeated left/right approval and CSV inclusion passed',flush=True)
     assert not errors, errors
     report = dict(exact_object_click=True,zoom_mapping=True,manual_outline=True,csv_updated=True,
                   restored_after_reopen=True,persistent_undo=True,insufficient_data_notice=True,
@@ -517,6 +568,8 @@ def interactions(browser, url, root, output, network_latency_ms=0):
                   toolbar_accept_reject=True,confirmed_repaint_repairs_missed_preview=True,
                   composited_color_verified=True,high_id_mapping=True,toolbar_measurements_unchanged=True,
                   background_clears_toolbar_target=True,
+                  blocked_approval_explained=True,selected_outline_repair=True,
+                  repaired_fiber_left_right_cycles=True,missing_geometry_never_fabricated=True,
                   browser_errors=errors)
     (output/'report.json').write_text(json.dumps(report,indent=2),encoding='utf-8')
     print('Browser interaction checks passed',flush=True)

@@ -12,6 +12,7 @@ from .learning import retrain
 from .review import ReviewSession
 from .id_labels import fiber_id_layout
 from .selection import select_baseline
+from .quality import approval_block_details
 
 
 def comparison_editor(result, review=None, image_name='', **kwargs):
@@ -94,6 +95,7 @@ def reviewed_results(baseline, image_name, source_sha, filters=None):
                          client_key=st.session_state[client_key], policy_key=review.context.rsplit(':',1)[-1] if filters else '',
                          geometry_key=str(review._mask_signature),
                          ack_token=st.session_state.get(ack_key),
+                         ack_fiber_id=st.session_state.get('review-object-' + key),
                          event_ok=notice.get('level') == 'success', message=notice.get('text', ''),
                          key='fiber-editor-' + key, default=None)
     if event is not None and not isinstance(event, dict):
@@ -124,7 +126,7 @@ def reviewed_results(baseline, image_name, source_sha, filters=None):
             if selected and event.get('action') == 'accept':
                 row = result.table.loc[result.table.fiber_id.eq(selected)].iloc[0]
                 if row.get('automatic_category') in ('too_small','ambiguous'):
-                    message = 'Human acceptance saved; measurements remain excluded: ' + row.get('exclusion_reason','unreliable geometry')
+                    message = f'Human label saved for fiber {selected}; not included in measurements. ' + approval_block_details(row)['message']
             st.session_state[notice_key] = dict(level='success', text=message)
         except (ValueError, sqlite3.Error, OSError) as error:
             st.session_state[notice_key] = dict(level='warning', text=str(error))
@@ -155,7 +157,13 @@ def reviewed_results(baseline, image_name, source_sha, filters=None):
                     changed = getattr(store,'undo' if undo else 'redo')(key, review.revision)
                 else:
                     changed = review.correct(int(selected), 'accepted' if accept else 'rejected', role)
-                st.session_state[notice_key] = dict(level='success', text='Correction saved.' if changed else 'Nothing to undo.')
+                message='Correction saved.' if changed else 'Nothing to undo.'
+                if accept and changed:
+                    row=result.table.loc[result.table.fiber_id.eq(selected)].iloc[0]
+                    blocked=approval_block_details(row)
+                    if blocked['message']:
+                        message=f'Human label saved for fiber {selected}; not included in measurements. '+blocked['message']
+                st.session_state[notice_key] = dict(level='success', text=message)
             except (ValueError, sqlite3.Error, OSError) as error:
                 st.session_state[notice_key] = dict(level='warning', text=str(error))
             st.rerun()

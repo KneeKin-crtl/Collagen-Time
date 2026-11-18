@@ -83,6 +83,12 @@ closing. Changing filters never reruns segmentation or centerline measurement.
 Each saved correction refreshes its object's color and ID visibility, including
 when the immediate provisional paint was missed. Acceptance still cannot bypass
 measurement eligibility; an ineligible fiber remains red with its reason shown.
+For an approved label whose mask has missing or branched geometry, the editor
+shows **NOT counted**, the available diagnostic details, and **Outline selected
+fiber**. Trace one separated boundary and save it to obtain measurements through
+the existing method. The outlined object gets a new ID; the original detection
+and its missing measurements remain in the audit dataset. Review mode resumes
+after saving this selected-fiber repair.
 
 Plain black ID labels with no background label **only measurable accepted fibers**, using the
 exact `fiber_id` exported in the Excel-readable CSV. Labels prefer background beside

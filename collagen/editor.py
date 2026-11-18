@@ -9,6 +9,7 @@ import streamlit as st
 import streamlit.components.v1 as components
 
 from .resources import resource_root
+from .quality import approval_block_details
 
 editor_path = resource_root() / 'assets' / 'fiber_editor'
 fiber_editor = components.declare_component('fiber_editor', path=str(editor_path))
@@ -97,6 +98,7 @@ def editor_objects(table):
         # A superseded object has no editable visible mask. Remaining hard gates
         # cannot be waived by a color change; the explicit human label is saved.
         finite=np.isfinite([row.get('length_um',np.nan),row.get('mean_diameter_um',np.nan)]).all()
+        blocked=approval_block_details(row)
         saved_event=row.get('last_correction_id')
         try:
             saved_event=int(saved_event) if saved_event is not None and np.isfinite(saved_event) else 0
@@ -108,6 +110,7 @@ def editor_objects(table):
                             manual=manual if isinstance(manual,str) else None,
                             saved_event=saved_event,
                             can_accept=not hard,
+                            accept_block_message=blocked['message'], can_outline=blocked['can_outline'],
                             automatic_reason=row.get('automatic_exclusion_reason',row.get('qc_flags','')),
                             reason=row.get('exclusion_reason',row.get('qc_flags','')),
                             needs_review=bool(row.get('requires_manual_review',row['review_status']!='accepted'))))
