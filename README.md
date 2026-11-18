@@ -57,6 +57,11 @@ view accepts review clicks. The original preview retains decoded uint8/uint16 pi
 without annotations, resizing or contrast changes. Other TIFF pixel types require
 a labeled browser display conversion; the original analysis/download pixels remain intact.
 
+The [Clean Research Lab interface](docs/research-lab-ui.md) groups settings and review
+tools, displays the original project graphic, and shows existing saved summary
+counts above the workspace. Raw summary data and detailed QC remain expandable.
+The presentation does not change scientific processing or saved review decisions.
+
 The analysis view is an interactive, full-resolution overlay on the original:
 **green** marks selected measurable fibers and **red** marks excluded detections,
 with automatic exclusions distinguished from manual rejection in the table.

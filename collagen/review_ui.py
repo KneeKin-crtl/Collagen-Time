@@ -13,6 +13,7 @@ from .review import ReviewSession
 from .id_labels import fiber_id_layout
 from .selection import select_baseline
 from .quality import approval_block_details
+from .ui import summary_cards
 
 
 def comparison_editor(result, review=None, image_name='', **kwargs):
@@ -64,7 +65,9 @@ def reviewed_results(baseline, image_name, source_sha, filters=None):
         st.error(f'Manual review storage is unavailable: {error}. Baseline analysis remains available. Set COLLAGEN_FEEDBACK_DIR to a writable folder to enable saved review.')
         if filters is not None:
             baseline = select_baseline(baseline,filters)
-        st.json(baseline.summary)
+        summary_cards(baseline.summary)
+        with st.expander('Analysis summary details'):
+            st.json(baseline.summary)
         comparison_editor(baseline, image_name=image_name, review_enabled=False, key='baseline-comparison', default=None,
                           message='Baseline results; saved manual review is unavailable.')
         return baseline
@@ -76,18 +79,22 @@ def reviewed_results(baseline, image_name, source_sha, filters=None):
         st.session_state.pop('feedback_backup', None)
         st.session_state['review_context'] = review.context
     result = review.result
-    st.json(result.summary)
+    summary_cards(result.summary)
     role_locked = store.image_role(review.image_key)
-    role = st.selectbox('Dataset role for this image', ['training', 'evaluation'],
-                        index=1 if role_locked == 'evaluation' else 0, disabled=role_locked is not None,
-                        format_func=lambda s: 'Training examples' if s == 'training' else 'Evaluation only — never used for fitting',
-                        key='dataset-role-' + review.image_key)
-    st.caption('Choose before your first correction. The role is locked after saving a review. Reserve at least two independent images for evaluation and two for training; explicitly review both accepted and rejected objects in each group.')
+    with st.container(key='dataset-review'):
+        role_columns=st.columns([1,2],vertical_alignment='center')
+        with role_columns[0]:
+            role = st.selectbox('Dataset role for this image', ['training', 'evaluation'],
+                                index=1 if role_locked == 'evaluation' else 0, disabled=role_locked is not None,
+                                format_func=lambda s: 'Training examples' if s == 'training' else 'Evaluation only — never used for fitting',
+                                key='dataset-role-' + review.image_key)
+        with role_columns[1]:
+            st.caption('Choose before your first correction. The role is locked after saving a review. Reserve at least two independent images for evaluation and two for training; explicitly review both accepted and rejected objects in each group.')
     notice = st.session_state.get(notice_key, {})
     if notice:
         getattr(st, notice['level'])(notice['text'])
     model_name = review.model['model_id'][:12] if review.model else 'baseline rules'
-    st.caption(f'Object classifier: {model_name}. Left-click to accept; right-click to reject. A/R accept/reject the selected object, N advances, Ctrl+Z undoes and Ctrl+Y redoes. Choose Toggle mode for the earlier click behavior. Background never selects a neighbor.')
+    st.caption(f'Object classifier: {model_name}.')
     client_key = 'review_client-' + key
     if client_key not in st.session_state:
         st.session_state[client_key] = uuid.uuid4().hex
@@ -132,6 +139,8 @@ def reviewed_results(baseline, image_name, source_sha, filters=None):
             st.session_state[notice_key] = dict(level='warning', text=str(error))
         st.rerun()
 
+    with st.expander('Analysis summary details'):
+        st.json(result.summary)
     st.caption(f"Green: {result.summary['accepted_measurement_count']} selected measurable fibers · Red: {result.summary['review_required_count']} excluded detections. Automatic exclusions and manual rejections have separate categories and reasons in the table and CSV. Detections and raw measurements are retained.")
     st.caption('Black ID labels identify only measurable accepted fibers and match fiber_id in the CSV opened in Excel. Zoom for dense areas, or hide IDs to inspect boundaries. Click the colored fiber itself to change its review decision.')
     if result.summary.get('manual_accepted_but_ineligible_count',0):
@@ -140,6 +149,7 @@ def reviewed_results(baseline, image_name, source_sha, filters=None):
         st.warning('Some accepted objects cannot provide reliable complete measurements. Their original QC flags are retained. Outline a separated individual fiber if appropriate; accepting a merged or truncated object does not reconstruct its missing centerline.')
 
     with st.expander('Review by object ID and save confirmations', expanded=False):
+        st.caption(f'Object classifier: {model_name}. Left-click to accept; right-click to reject. A/R accept/reject the selected object, N advances, Ctrl+Z undoes and Ctrl+Y redoes. Choose Toggle mode for the earlier click behavior. Background never selects a neighbor.')
         ids = result.table.fiber_id.tolist()
         selected_key = 'review-object-' + key
         if st.session_state.get(selected_key) not in ids:

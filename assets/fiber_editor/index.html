@@ -3,43 +3,34 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<style>
-:root{--text:#eee;--surface:#262730;--background:#0e1117}
-body{font:14px system-ui,sans-serif;color:var(--text);background:var(--background);margin:0}
-.tools{display:flex;gap:8px;align-items:center;flex-wrap:wrap;padding:5px 0}
-button{border:1px solid #777;border-radius:5px;padding:7px 10px;background:var(--surface);color:var(--text);cursor:pointer}
-button[aria-pressed="true"]{border:2px solid #48dc86;padding:6px 9px}
-button:disabled{opacity:.45;cursor:wait}
-.results-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:16px}
-.results-grid section{min-width:0}
-h3{font-size:17px;margin:10px 0}
-.viewport{box-sizing:border-box;overflow:auto;width:100%;max-height:600px;border:1px solid #777;border-radius:5px;background:#121212}
-#original-image{cursor:default}
-.viewport{position:relative}
-#outline-preview{position:absolute;top:0;left:0;pointer-events:none}
-select{max-width:100%;font:inherit;color:var(--text);background:var(--surface);padding:5px}
-#original-note{margin:5px 0;font-size:12px}
-@media(max-width:760px){.results-grid{grid-template-columns:minmax(0,1fr)}}
-canvas{display:block;cursor:crosshair;touch-action:pan-x pan-y}
-#status{min-height:20px;padding:5px 0}
-.green{color:#63f78a}.red{color:#ff7979}
-input{vertical-align:middle}
-</style>
+<link rel="stylesheet" href="lab-theme.css">
+<link rel="stylesheet" href="editor.css">
 </head>
 <body>
-<div class="tools">
+<div class="tools" aria-label="Fiber review tools">
+ <div class="tool-group" role="group" aria-label="Review controls">
+ <span class="group-title">Review &amp; outline</span><div class="button-row">
  <button id="toggle" aria-pressed="true">Review fibers</button>
  <button id="outline" aria-pressed="false">Outline missed / merged fiber</button>
  <button id="save" disabled>Save outline</button>
  <button id="clear">Clear outline</button>
+ </div></div>
+ <div class="tool-group" role="group" aria-label="Classification controls">
+ <span class="group-title">Classification</span><div class="button-row">
  <button id="accept" aria-label="Accept selected (A)">Accept selected (A)</button>
  <button id="reject" aria-label="Reject selected (R)">Reject selected (R)</button>
  <button id="resolve" hidden>Outline selected fiber</button>
  <button id="next">Next unreviewed (N)</button>
+ </div></div>
+ <div class="tool-group history" role="group" aria-label="History controls">
+ <span class="group-title">History</span><div class="button-row">
  <button id="undo">Undo</button>
  <button id="redo">Redo</button>
- <label>Click mode <select id="clickMode" aria-label="Click mode"><option value="accept_reject">Left accept / right reject</option><option value="toggle">Left click toggles</option></select></label>
- <label>Show <select id="viewMode" aria-label="Detection visibility"><option value="all">All detections</option><option value="hide_auto">Hide automatic exclusions</option><option value="review">Only requiring manual review</option></select></label>
+ </div></div>
+</div>
+<div class="display-tools" role="group" aria-label="Display controls">
+ <label class="select-control">Click mode <select id="clickMode" aria-label="Click mode"><option value="accept_reject">Left accept / right reject</option><option value="toggle">Left click toggles</option></select></label>
+ <label class="select-control">Show <select id="viewMode" aria-label="Detection visibility"><option value="all">All detections</option><option value="hide_auto">Hide automatic exclusions</option><option value="review">Only requiring manual review</option></select></label>
  <label><input id="shortcuts" type="checkbox" checked> Keyboard shortcuts</label>
  <label><input id="showIds" type="checkbox" checked> Show accepted fiber IDs</label>
  <label>Zoom <input aria-label="Zoom" id="zoom" type="range" min="50" max="800" value="100" step="25"> <span id="zoomLabel">100%</span></label>
@@ -58,7 +49,7 @@ input{vertical-align:middle}
  </section>
 </div>
 <div id="review-progress" aria-live="polite"></div>
-<div><span class="green">Green: accepted</span> · <span class="red">Red: excluded or manually rejected</span> · Measurements unavailable for ambiguous geometry remain flagged.</div>
+<div class="legend"><span class="green">Green: accepted</span><span class="red">Red: excluded or manually rejected</span><span>Measurements unavailable for ambiguous geometry remain flagged.</span></div>
 <script src="editor.js"></script>
 </body>
 </html>
