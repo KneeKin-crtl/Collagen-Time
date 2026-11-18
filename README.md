@@ -64,6 +64,9 @@ Left-click to accept, right-click to reject; choose **Left click toggles** for t
 earlier behavior. A/R accept/reject the selected object; N advances through
 unreviewed objects. Undo/Redo and Ctrl+Z/Ctrl+Y preserve history. Enable/disable
 keyboard shortcuts in the editor. Background clicks never select nearby objects.
+The selected ID and decision appear above the images, and the Accept/Reject
+buttons name their target ID. A temporary dashed box marks that object's bounds
+without changing exported images. Clicking background clears the toolbar target.
 
 Under **Fiber selection and measurement eligibility**, configure optional diameter
 range (150–335 nm initially, **disabled by default**), minimum length in µm, area in
@@ -77,6 +80,15 @@ Color changes are local and provisional until acknowledged by the saved review.
 The editor queues rapid corrections and restores confirmed decisions on a failed
 save. Wait for **All corrections saved** before exporting, switching images or
 closing. Changing filters never reruns segmentation or centerline measurement.
+Each saved correction refreshes its object's color and ID visibility, including
+when the immediate provisional paint was missed. Acceptance still cannot bypass
+measurement eligibility; an ineligible fiber remains red with its reason shown.
+For an approved label whose mask has missing or branched geometry, the editor
+shows **NOT counted**, the available diagnostic details, and **Outline selected
+fiber**. Trace one separated boundary and save it to obtain measurements through
+the existing method. The outlined object gets a new ID; the original detection
+and its missing measurements remain in the audit dataset. Review mode resumes
+after saving this selected-fiber repair.
 
 Plain black ID labels with no background label **only measurable accepted fibers**, using the
 exact `fiber_id` exported in the Excel-readable CSV. Labels prefer background beside

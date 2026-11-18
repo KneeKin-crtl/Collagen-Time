@@ -20,6 +20,11 @@ function controls(){
   const disabled=!ready || args?.review_enabled===false;
   for(const id of ['toggle','outline','clear','accept','reject'])$(id).disabled=disabled || barrier();
   for(const id of ['accept','reject'])$(id).disabled=disabled || barrier() || !visible(objects.get(state?.selected));
+  const target=visible(objects.get(state?.selected))?'fiber '+state.selected:'selected';
+  $('accept').textContent=`Accept ${target} (A)`;$('reject').textContent=`Reject ${target} (R)`;
+  const selected=objects.get(state?.selected);
+  $('resolve').hidden=!(visible(selected) && selected.manual==='accepted' && !selected.accepted && selected.can_outline);
+  $('resolve').disabled=disabled || barrier() || state?.mode!=='review';
   for(const id of ['undo','redo'])$(id).disabled=disabled || barrier();
   $('next').disabled=disabled;
   for(const id of ['clickMode','viewMode','shortcuts','showIds','zoom'])$(id).disabled=!ready;
@@ -40,6 +45,7 @@ function projected(){
       obj.manual=event.action==='accept'?'accepted':'rejected';
       obj.accepted=event.action==='accept' && obj.can_accept;
       obj.category=obj.accepted?'accepted':event.action==='reject'?'rejected':obj.automatic_category;
+      obj.reason=obj.accepted?'':event.action==='reject'?'manual_rejection':obj.automatic_reason;
       obj.needs_review=event.action==='accept' && !obj.can_accept;
     }
   }
@@ -63,8 +69,11 @@ function updateMetadata(){
   $('review-progress').textContent=`Reviewed ${reviewed} / ${args.review_progress?.total||rows.length} detections (${rows.filter(visible).length} shown) · Selected measurable fibers: ${count} · ${saved?'All corrections saved':`${pending().length} saving — colors/counts are provisional`}`;
   canvas.dataset.reviewedCount=String(reviewed);
   const selected=objects.get(state.selected);
-  $('selected').textContent=selected?`Fiber ${selected.fiber_id}: ${selected.category.replaceAll('_',' ')}${selected.reason?' · '+selected.reason:''}`:'Select a colored object. A: accept · R: reject · N: next unreviewed · Ctrl+Z / Ctrl+Y: undo / redo.';
-  controls();height();
+  const blocked=selected?.manual==='accepted' && !selected.accepted;
+  const decision=blocked?'human label accepted; NOT counted':selected?.category.replaceAll('_',' ');
+  const reason=blocked?selected.accept_block_message||selected.reason:selected?.reason;
+  $('selected').textContent=selected?`Fiber ${selected.fiber_id}: ${decision}${reason?' · '+reason:''}`:'Select a colored object. A: accept · R: reject · N: next unreviewed · Ctrl+Z / Ctrl+Y: undo / redo.';
+  points();controls();height();
 }
 function intersects(a,b){return a[0]<b[2] && b[0]<a[2] && a[1]<b[3] && b[1]<a[3];}
 function paintRect(rect){
@@ -104,14 +113,26 @@ function reconcile(previous){
   const changed=new Set();
   for(const [id,obj] of objects){const old=previous.get(id);
     if(!old || old.accepted!==obj.accepted || old.measurable!==obj.measurable ||
-       old.manual!==obj.manual || old.needs_review!==obj.needs_review)changed.add(id);}
+       old.manual!==obj.manual || old.needs_review!==obj.needs_review ||
+       // Confirmation must repaint even if the optimistic decision already
+       // matches: a missed provisional draw must never become the saved view.
+       old.saved_event!==obj.saved_event)changed.add(id);}
   paintObjects(changed);updateMetadata();
 }
 function points(){
   if(!assets)return;
   previewCtx.clearRect(0,0,preview.width,preview.height);
-  if(!state.points.length)return;
   const scale=fit*Number(zoom.value)/100;
+  if(state.mode==='review' && visible(objects.get(state.selected))){
+    const b=assets.bounds.get(state.selected),pad=3/scale;
+    if(b){
+      previewCtx.save();previewCtx.lineWidth=3/scale;previewCtx.strokeStyle='#000';
+      previewCtx.strokeRect(b[0]-pad,b[1]-pad,b[2]-b[0]+2*pad,b[3]-b[1]+2*pad);
+      previewCtx.lineWidth=1/scale;previewCtx.strokeStyle='#fff';previewCtx.setLineDash([4/scale,4/scale]);
+      previewCtx.strokeRect(b[0]-pad,b[1]-pad,b[2]-b[0]+2*pad,b[3]-b[1]+2*pad);previewCtx.restore();
+    }
+  }
+  if(state.mode!=='outline' || !state.points.length)return;
   previewCtx.lineWidth=2/scale;previewCtx.strokeStyle='#ffd43b';previewCtx.fillStyle='#ffd43b';previewCtx.beginPath();
   state.points.forEach((p,i)=>i?previewCtx.lineTo(...p):previewCtx.moveTo(...p));previewCtx.stroke();
   for(const p of state.points){previewCtx.beginPath();previewCtx.arc(...p,3/scale,0,2*Math.PI);previewCtx.fill();}
@@ -152,22 +173,31 @@ function classify(id,action,extra={}){
   if(!editable() || !visible(objects.get(id)))return;
   state.selected=id;enqueue(action,Object.assign({fiber_id:id},extra));
 }
+function focusSelected(){
+  const bounds=assets.bounds.get(state.selected),scale=fit*Number(zoom.value)/100;
+  if(!bounds)return;
+  viewport.scrollLeft=Math.max(0,(bounds[0]+bounds[2])/2*scale-viewport.clientWidth/2);
+  viewport.scrollTop=Math.max(0,(bounds[1]+bounds[3])/2*scale-viewport.clientHeight/2);
+  syncScroll(viewport,originalViewport);
+}
 function selectNext(direction=1){
   const candidates=Array.from(objects.values()).filter(o=>visible(o) && o.manual===null).map(o=>o.fiber_id).sort((a,b)=>a-b);
   const ids=candidates.length?candidates:Array.from(objects.values()).filter(visible).map(o=>o.fiber_id).sort((a,b)=>a-b);
   if(!ids.length){status('No objects in the current view.');return;}
   const index=ids.indexOf(state.selected);
   state.selected=ids[index<0?(direction>0?0:ids.length-1):(index+direction+ids.length)%ids.length];
-  const bounds=assets.bounds.get(state.selected),scale=fit*Number(zoom.value)/100;
-  viewport.scrollLeft=Math.max(0,(bounds[0]+bounds[2])/2*scale-viewport.clientWidth/2);
-  viewport.scrollTop=Math.max(0,(bounds[1]+bounds[3])/2*scale-viewport.clientHeight/2);
-  syncScroll(viewport,originalViewport);updateMetadata();canvas.focus({preventScroll:true});
+  focusSelected();updateMetadata();canvas.focus({preventScroll:true});
 }
-function setMode(mode){if(!editable())return;state.mode=mode;controls();status(mode==='outline'?'Trace one separated boundary, then Save outline. Backspace removes a vertex.':'Left accept / right reject, or choose Toggle mode.');}
+function setMode(mode){if(!editable())return;state.mode=mode;state.resolving=false;points();controls();status(mode==='outline'?'Trace one separated boundary, then Save outline. Backspace removes a vertex.':'Left accept / right reject, or choose Toggle mode.');}
 $('toggle').onclick=()=>setMode('review');$('outline').onclick=()=>setMode('outline');
 $('clear').onclick=()=>{state.points=[];points();controls();};
 $('save').onclick=()=>enqueue('outline',{points:state.points.map(p=>p.slice())});
 $('accept').onclick=()=>classify(state.selected,'accept');$('reject').onclick=()=>classify(state.selected,'reject');
+$('resolve').onclick=()=>{
+  if(!editable() || !objects.get(state.selected)?.can_outline)return;
+  focusSelected();setMode('outline');state.resolving=true;canvas.focus({preventScroll:true});
+  status('Trace the actual boundary of one separated fiber, then Save outline. Its measurements will use the existing method; the original detection is retained.');
+};
 $('next').onclick=()=>selectNext();$('undo').onclick=()=>enqueue('undo');$('redo').onclick=()=>enqueue('redo');
 $('clickMode').onchange=e=>{state.clickMode=e.target.value;};
 $('shortcuts').onchange=e=>{state.shortcuts=e.target.checked;};
@@ -188,7 +218,10 @@ canvas.onpointerup=e=>{
     state.points.push([x,y]);points();controls();return;
   }
   const id=assets.labels[Math.floor(y)*assets.width+Math.floor(x)],obj=objects.get(id);
-  if(!visible(obj)){status('No visible detected object at that pixel. Background never selects a neighbor.');return;}
+  if(!visible(obj)){
+    state.selected=null;updateMetadata();
+    status('No visible detected object at that pixel. Selection cleared; background never selects a neighbor.');return;
+  }
   const action=button===2?'reject':state.clickMode==='toggle' && obj.accepted?'reject':'accept';
   if(button===0 || button===2)classify(id,action,{x,y});
 };
@@ -243,7 +276,13 @@ window.addEventListener('message',async event=>{
   state=shared.states.get(client);
   let notice=data.message||'';
   if(state.inflight && data.ack_token===state.inflight.token){
-    if(state.inflight.action==='outline' && data.event_ok)state.points=[];
+    if(state.inflight.action==='outline' && data.event_ok){
+      state.points=[];
+      if(state.resolving){
+        state.mode='review';state.resolving=false;
+        if(Number.isInteger(data.ack_fiber_id))state.selected=data.ack_fiber_id;
+      }
+    }
     if(!data.event_ok){state.queue=[];notice='Save failed; provisional changes were restored to the confirmed state. '+notice;}
     state.inflight=null;
   }

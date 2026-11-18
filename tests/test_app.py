@@ -394,6 +394,30 @@ def test_physical_filters_change_eligibility_without_geometry_or_image_encoding(
         assert args['objects'][0]['accepted'] and args['objects'][0]['manual']=='accepted'
 
 
+def test_ambiguous_approval_reports_actual_geometry_and_offers_existing_outline(uploads):
+    image=np.zeros((100,160),np.uint16)
+    image[40:49,20:140]=45000;image[20:75,70:79]=45000
+    uploads['image']=('crossing.tiff',image_bytes(image))
+    app=submit(AppTest.from_file(APP).run(timeout=30))
+    before=app.dataframe[0].value.copy(deep=True)
+    args=json.loads(app.main.get('component_instance')[0].proto.json_args)
+    event=dict(action='accept',token='approve-crossing',context=args['context'],x=30,y=44,fiber_id=1)
+    with patch('collagen.review_ui.fiber_editor',return_value=event):app.run(timeout=30)
+    app.run(timeout=30)
+    assert not app.exception
+    row=app.dataframe[0].value.iloc[0]
+    assert row.manual_classification=='accepted' and not row.included_in_measurement_statistics
+    assert np.isnan(row.length_um) and np.isnan(row.mean_diameter_um)
+    assert 'not included in measurements' in app.success[0].value
+    assert 'crossing or branching geometry' in app.success[0].value
+    args=json.loads(app.main.get('component_instance')[0].proto.json_args)
+    obj=args['objects'][0]
+    assert obj['can_outline'] and not obj['can_accept'] and not obj['accepted']
+    assert '4 endpoints' in obj['accept_block_message']
+    geometry=['fiber_id','length_um','mean_diameter_um','diameter_sd_um','endpoints']
+    assert app.dataframe[0].value[geometry].equals(before[geometry])
+
+
 def test_browser_asset_acknowledgment_uses_references_and_cache_miss_restores_layers(uploads):
     image=np.zeros((80,120),np.uint16);image[30:39,15:100]=45000
     uploads['image']=('assets.tiff',image_bytes(image))

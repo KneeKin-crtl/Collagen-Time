@@ -7,6 +7,7 @@ import argparse
 from contextlib import closing, suppress
 import csv
 import hashlib
+from io import BytesIO
 import json
 import os
 from pathlib import Path
@@ -24,6 +25,7 @@ import zlib
 import zipfile
 
 from playwright.sync_api import sync_playwright, expect
+from PIL import Image
 
 
 def editor_diagnostics(page):
@@ -60,11 +62,26 @@ def new_analysis_page(browser, network_latency_ms=0):
     return page
 
 
-def synthetic_png(path, variant=False):
+def synthetic_png(path, variant=False, high_ids=False, crossing=False):
     # Mid-gray microscopy-like background makes plain black ID glyphs visible.
     # Larger than either result column: exercise fit-to-width and source mapping.
     rows = [bytearray([80]*1280) for _ in range(800)]
-    for y0,y1,x0,x1 in ((30,41,30,140),(70,81,30,140),(110,121,0,140)):
+    if crossing:
+        for y in range(200,211):
+            rows[y][300:601]=bytes([200])*301
+        for x in (330,370,410,450,490,530):
+            for y in range(150,251):
+                rows[y][x:x+5]=bytes([200])*5
+    if high_ids:
+        # Real connected-component numbering above one byte, including the
+        # reported ID 1855. Tiny isolated components stay excluded and retained.
+        for y in range(10,28,3):
+            for x in range(10,937,3):
+                rows[y][x]=200
+        for x in range(10,541,3):
+            rows[80][x]=200
+    bars=((60,71,30,140),(100,111,30,140)) if high_ids else ((30,41,30,140),(70,81,30,140),(110,121,0,140))
+    for y0,y1,x0,x1 in bars:
         for y in range(y0,y1):
             rows[y][x0:x1] = bytes([200]) * (x1-x0)
     if variant:
@@ -418,6 +435,125 @@ def interactions(browser, url, root, output, network_latency_ms=0):
     page.get_by_role('button',name='Retrain Model Using Corrections',exact=True).click()
     page.get_by_text('Each dataset role needs at least five explicitly reviewed accepted and five rejected examples.',
                      exact=True).wait_for(timeout=20000)
+    # Exercise the actual toolbar, with thousands of retained candidates and a
+    # high ID. A saved confirmation must repair a missed provisional draw.
+    synthetic_png(root/'high-ids.png',high_ids=True)
+    upload_image(root/'high-ids.png')
+    expect(calibration).to_have_value('')
+    calibration.fill('.5');calibration.press('Tab')
+    research_range=page.get_by_role('checkbox',name='Enable research-interest diameter range',exact=True)
+    if research_range.is_checked():
+        # Streamlit's styled label overlays its native checkbox input.
+        page.get_by_text('Enable research-interest diameter range',exact=True).click()
+    expect(research_range).not_to_be_checked()
+    width.fill('3');width.press('Tab')
+    page.get_by_role('button',name='Analyze image',exact=True).click()
+    wait_saved()
+    assert_ids([1855,2033])
+    editor().locator('#zoom').fill('400')
+    click(50,65)
+    wait_color(50,65,True)
+    expect(editor().locator('#accept')).to_have_text('Accept fiber 1855 (A)')
+    expect(editor().locator('#reject')).to_have_text('Reject fiber 1855 (R)')
+    high_original=original_pixels()
+    def export_rows(name):
+        with page.expect_download() as downloaded:
+            page.get_by_role('button',name='Download per-fiber CSV',exact=True).click()
+        downloaded.value.save_as(output/name)
+        with (output/name).open(encoding='utf-8',newline='') as file:
+            return list(csv.DictReader(file))
+    high_before=export_rows('toolbar-before.csv')
+    assert len(high_before)==2033
+    def displayed_pixel(x,y):
+        # Inspect Chromium's composited output, not just the canvas buffer or
+        # state metadata. Keep the source pixel inside the visible viewport.
+        editor().locator('#viewport').scroll_into_view_if_needed()
+        c=editor().locator('#image')
+        c.evaluate('''(c,p)=>{
+            const v=c.parentElement,s=c.getBoundingClientRect().width/c.width;
+            v.scrollLeft=Math.max(0,p[0]*s-v.clientWidth/2);
+            v.scrollTop=Math.max(0,p[1]*s-v.clientHeight/2);
+        }''',[x,y])
+        box=c.bounding_box()
+        sx,sy=box['x']+x*box['width']/1280,box['y']+y*box['height']/800
+        screenshot=page.screenshot(clip=dict(x=int(sx)-2,y=int(sy)-2,width=5,height=5))
+        return Image.open(BytesIO(screenshot)).convert('RGB').getpixel((2,2))
+    for action,green in (('reject',False),('accept',True)):
+        editor().locator('#image').evaluate('''()=>{
+            const original=paintObjects;let skip=true;
+            paintObjects=function(ids){if(skip){skip=false;return;}original(ids);};
+        }''')
+        editor().locator('#'+action).click()
+        wait_saved()
+        # Confirmation must repaint even when the preview's decision metadata
+        # already equals the server's decision. The old implementation fails.
+        value=color(50,65)
+        assert (value[1]>value[0] if green else value[0]>value[1]), (action,value)
+        value=displayed_pixel(50,65)
+        assert (value[1]>value[0] if green else value[0]>value[1]), ('visible '+action,value)
+        expect(editor().locator('#selected')).to_contain_text('Fiber 1855: '+('accepted' if green else 'rejected'))
+        assert_ids([1855,2033] if green else [2033])
+        assert color(50,105)[1]>color(50,105)[0], 'The toolbar changed a neighboring fiber.'
+        saved_rows=export_rows('toolbar-'+action+'.csv')
+        expected_ids=[int(r['fiber_id']) for r in saved_rows if r['included_in_measurement_statistics']=='True']
+        assert [item['fiber_id'] for item in id_labels()]==expected_ids
+        assert saved_rows[1854]['manual_classification']==('accepted' if green else 'rejected')
+        geometry=('fiber_id','length_um','mean_diameter_um','diameter_sd_um','calibration_um_per_px')
+        assert [[r[k] for k in geometry] for r in saved_rows]==[[r[k] for k in geometry] for r in high_before]
+        assert original_pixels()==high_original
+    # A background click must clear a stale toolbar target without saving a
+    # correction or choosing a nearby object.
+    before_states=states()
+    click(500,500)
+    expect(editor().locator('#accept')).to_be_disabled()
+    expect(editor().locator('#reject')).to_be_disabled()
+    assert states()==before_states
+    print('High-ID toolbar accept/reject, confirmed repaint, visible pixels, stable measurements and exact target passed',flush=True)
+    # A real human label cannot fill missing measurements. Reproduce a mask
+    # with 14 endpoints, show why it is excluded, and use the existing outline
+    # method to resolve one fiber without changing the original geometry.
+    synthetic_png(root/'crossing.png',crossing=True)
+    upload_image(root/'crossing.png')
+    expect(calibration).to_have_value('')
+    calibration.fill('.5');calibration.press('Tab')
+    page.get_by_role('button',name='Analyze image',exact=True).click()
+    wait_saved()
+    assert_ids([1,2])
+    click(310,205)
+    wait_saved()
+    assert color(310,205)[0]>color(310,205)[1]
+    expect(editor().locator('#selected')).to_contain_text('human label accepted; NOT counted')
+    expect(editor().locator('#selected')).to_contain_text('14 endpoints')
+    expect(editor().locator('#selected')).to_contain_text('Length / Diameter unavailable')
+    expect(editor().locator('#review-progress')).to_contain_text('Selected measurable fibers: 2')
+    expect(editor().locator('#resolve')).to_be_visible()
+    blocked_rows=export_rows('blocked-approval.csv')
+    assert blocked_rows[3]['manual_classification']=='accepted'
+    assert blocked_rows[3]['included_in_measurement_statistics']=='False'
+    assert blocked_rows[3]['length_um']==blocked_rows[3]['mean_diameter_um']==''
+    editor().get_by_role('button',name='Outline selected fiber',exact=True).click()
+    for point in ((300,200),(600,200),(600,210),(300,210)):
+        click(*point)
+    editor().get_by_role('button',name='Save outline',exact=True).click()
+    wait_color(310,205,True)
+    assert_ids([1,2,5])
+    expect(editor().locator('#toggle')).to_have_attribute('aria-pressed','true')
+    expect(editor().locator('#selected')).to_contain_text('Fiber 5: accepted')
+    expect(editor().locator('#resolve')).to_be_hidden()
+    for _ in range(3):
+        click(310,205,button='right');wait_color(310,205,False)
+        assert_ids([1,2])
+        click(310,205);wait_color(310,205,True)
+        assert_ids([1,2,5])
+        assert color(50,35)[1]>color(50,35)[0] and color(50,75)[1]>color(50,75)[0]
+    resolved_rows=export_rows('resolved-approval.csv')
+    assert resolved_rows[3]['included_in_measurement_statistics']=='False'
+    assert resolved_rows[3]['length_um']==resolved_rows[3]['mean_diameter_um']==''
+    assert resolved_rows[4]['included_in_measurement_statistics']=='True'
+    assert resolved_rows[4]['object_source']=='manual'
+    assert float(resolved_rows[4]['length_um'])>0 and float(resolved_rows[4]['mean_diameter_um'])>0
+    assert color(330,160)[0]>color(330,160)[1], 'Outline must not approve the entire connected crossing.'
+    print('Missing-geometry diagnosis, selected-fiber outline, repeated left/right approval and CSV inclusion passed',flush=True)
     assert not errors, errors
     report = dict(exact_object_click=True,zoom_mapping=True,manual_outline=True,csv_updated=True,
                   restored_after_reopen=True,persistent_undo=True,insufficient_data_notice=True,
@@ -429,6 +565,11 @@ def interactions(browser, url, root, output, network_latency_ms=0):
                   rapid_queue_exactly_once=True,failed_save_rollback=True,display_filters_only=True,review_progress=True,
                   research_range_filter=True,manual_range_override=True,reliability_gate=True,calibrated_csv_fields=True,
                   uploaded_source_verified=True,same_name_replacement=True,network_latency_ms=network_latency_ms,
+                  toolbar_accept_reject=True,confirmed_repaint_repairs_missed_preview=True,
+                  composited_color_verified=True,high_id_mapping=True,toolbar_measurements_unchanged=True,
+                  background_clears_toolbar_target=True,
+                  blocked_approval_explained=True,selected_outline_repair=True,
+                  repaired_fiber_left_right_cycles=True,missing_geometry_never_fabricated=True,
                   browser_errors=errors)
     (output/'report.json').write_text(json.dumps(report,indent=2),encoding='utf-8')
     print('Browser interaction checks passed',flush=True)
