@@ -1,7 +1,7 @@
 import cv2
 import numpy as np
 from .preprocessing import normalize
-from .quality import counted_candidates
+from .quality import counted_candidates, review_approved_candidates
 
 COUNTED_COLOR = (0, 255, 0)
 EXCLUDED_COLOR = (255, 0, 0)
@@ -68,6 +68,13 @@ def count_overlay(image, labels, table, opacity=.6):
         canvas[selected] = np.rint((1 - opacity) * canvas[selected]
                                   + opacity * np.asarray(color)).astype(np.uint8)
     return canvas
+
+
+def review_overlay(image, labels, table, opacity=.6):
+    """Green #00FF00 approval tint; numerical eligibility remains unchanged."""
+    display=table.copy()
+    display['review_status']=np.where(review_approved_candidates(table),'accepted','review_required')
+    return count_overlay(image,labels,display,opacity)
 
 
 def annotate(image, objects, exclusion_regions=()):

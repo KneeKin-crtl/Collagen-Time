@@ -3,7 +3,7 @@ import json
 import zipfile
 import numpy as np
 import tifffile
-from .visualization import count_overlay
+from .visualization import count_overlay, review_overlay
 from .id_labels import fiber_id_layout, fiber_id_layer, composite_id_layer
 from .pipeline import ensure_annotation
 
@@ -18,10 +18,12 @@ def result_archive(result):
     id_labels = result.id_labels if result.id_labels is not None else fiber_id_layout(result.labels, result.table)
     labeled_overlay = composite_id_layer(count_overlay(result.original,result.labels,result.table),
                                          fiber_id_layer(result.labels,id_labels))
+    reviewed_overlay = composite_id_layer(review_overlay(result.original,result.labels,result.table),
+                                          fiber_id_layer(result.labels,id_labels))
     with zipfile.ZipFile(output, "w", zipfile.ZIP_DEFLATED) as archive:
         for name, array in {"original": result.original, "segmentation": result.mask.astype(np.uint8),
                             "labels": result.labels.astype(np.uint32), "annotated": result.annotated,
-                            "count_overlay": labeled_overlay}.items():
+                            "count_overlay": labeled_overlay,"review_overlay": reviewed_overlay}.items():
             buffer = BytesIO()
             tifffile.imwrite(buffer, array)
             archive.writestr(name + ".tiff", buffer.getvalue())

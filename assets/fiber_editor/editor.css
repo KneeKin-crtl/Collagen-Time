@@ -22,6 +22,10 @@ input { accent-color: var(--lab-accent); vertical-align: middle; }
 input[type="range"] { width: 130px; max-width: 45vw; }
 #zoomLabel { min-width: 36px; font-variant-numeric: tabular-nums; color: var(--lab-heading); }
 #selected { color: var(--lab-heading); font-weight: 550; font-size: 12px; line-height: 1.45; overflow-wrap: anywhere; }
+#mode-label { font-size: 12px; font-weight: 600; color: var(--lab-accent); margin: 0 0 5px; }
+#diagnostic-panel { font-size: 12px; color: var(--lab-muted); padding: 8px; border: 1px solid var(--lab-border); border-radius: 6px; }
+#diagnostic-panel[hidden] { display: none; }
+#click-log { max-height: 180px; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; }
 #status { color: var(--lab-muted); font-size: 12px; line-height: 1.45; min-height: 23px; padding: 3px 0 7px; }
 .results-grid { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 12px; }
 .results-grid section { min-width: 0; border: 1px solid var(--lab-border); border-radius: 9px; overflow: hidden; background: var(--lab-surface); }

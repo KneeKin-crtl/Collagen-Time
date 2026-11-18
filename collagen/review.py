@@ -13,7 +13,7 @@ from .geometry import measure
 from .learning import object_features, predict
 from .pipeline import Analysis, DISTANCE_FIELDS
 from .preprocessing import normalize
-from .quality import classify
+from .quality import classify, review_approved_candidates
 from .visualization import COUNTED_COLOR, EXCLUDED_COLOR
 from .id_labels import fiber_id_layout, fiber_id_layer, composite_id_layer
 from .selection import apply_selection
@@ -196,6 +196,7 @@ class ReviewSession:
         table = pd.DataFrame(rows) if rows else self.empty_table()
         if self.filters is not None:
             table = apply_selection(table, self.filters)
+        table['review_approved']=review_approved_candidates(table)
         accepted = table.review_status.eq('accepted') if self.filters is not None else table.classification.eq('accepted')
         measured = table[table.included_in_measurement_statistics.astype(bool)]
         summary = dict(candidate_count=len(table), accepted_count=int(accepted.sum()),
@@ -205,6 +206,7 @@ class ReviewSession:
                        excluded_region_count=int(table.excluded_region.sum()),
                        manual_reviewed_count=int(table.manual_classification.notna().sum()),
                        manual_added_count=len(manuals),
+                       review_approved_count=int(table.review_approved.sum()),
                        accepted_mean_length_um=float(measured.length_um.mean()),
                        accepted_mean_diameter_um=float(measured.mean_diameter_um.mean()))
         if self.filters is not None:
@@ -231,6 +233,7 @@ class ReviewSession:
                       history_event_ids=[int(o['state_event']) for o in self.objects if o['state_event']],
                       measurement_policy='Accepted objects with complete simple centerlines and reliable width; border/crossing/excluded-region objects stay out of measurement aggregates.',
                       dataset_role=self.store.image_role(self.image_key))}
+        parameters['review']['highlight_policy']='Green masks follow saved review approval; measurement counts and ID callouts use included_in_measurement_statistics.'
         if self.filters is not None:
             parameters['selection_filters'] = self.filters.parameters()
             parameters['review']['measurement_policy'] = ('Only selected measurable fibers; configurable mean-width, '
@@ -364,6 +367,6 @@ class ReviewSession:
             raise ValueError('No detected object at that pixel. Zoom in, or outline a missed fiber.')
         row = self.result.table.loc[self.result.table.fiber_id.eq(fiber_id)].iloc[0]
         label = ('accepted' if event['action'] == 'accept' else 'rejected' if event['action'] == 'reject'
-                 else 'rejected' if row.classification == 'accepted' else 'accepted')
+                 else 'rejected' if row.review_approved else 'accepted')
         self.correct(fiber_id, label, role, event['token'])
         return fiber_id

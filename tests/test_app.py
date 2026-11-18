@@ -382,7 +382,8 @@ def test_physical_filters_change_eligibility_without_geometry_or_image_encoding(
         widget(app,'button','Mark accepted').click().run(timeout=30)
         assert app.dataframe[0].value.manual_classification.tolist()==['accepted']
         assert app.dataframe[0].value.review_status.tolist()==['review_required']
-        assert app.warning and 'still fail measurement eligibility' in app.warning[0].value
+        assert app.warning and 'green approved masks are excluded from measurements' in app.warning[0].value
+        assert app.dataframe[0].value.review_approved.tolist()==[True]
         widget(app,'number_input','Minimum reliable mean width (pixels)').set_value(3.)
         widget(app,'checkbox','Enable research-interest diameter range').check()
         submit(app,calibration=.01)
@@ -413,6 +414,7 @@ def test_ambiguous_approval_reports_actual_geometry_and_offers_existing_outline(
     args=json.loads(app.main.get('component_instance')[0].proto.json_args)
     obj=args['objects'][0]
     assert obj['can_outline'] and not obj['can_accept'] and not obj['accepted']
+    assert obj['approved']
     assert '4 endpoints' in obj['accept_block_message']
     geometry=['fiber_id','length_um','mean_diameter_um','diameter_sd_um','endpoints']
     assert app.dataframe[0].value[geometry].equals(before[geometry])

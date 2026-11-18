@@ -6,6 +6,7 @@ const canvas=$('image'),ctx=canvas.getContext('2d'),viewport=$('viewport');
 const originalCanvas=$('original-image'),originalCtx=originalCanvas.getContext('2d');
 const originalViewport=$('original-viewport'),preview=$('outline-preview'),previewCtx=preview.getContext('2d');
 const zoom=$('zoom');
+const APPROVED_RGB=[0,255,0],REJECTED_RGB=[255,0,0],OVERLAY_OPACITY=.6;
 let args=null,state=null,assets=null,committedKey=null,objects=new Map(),origin='*',generation=0,ready=false,fit=1,down=null,lastHeight=0;
 // Streamlit may replace an iframe during reruns. Keep the queue and decoded
 // layers in this browser tab so replacement cannot lose queued review events.
@@ -16,6 +17,11 @@ function pending(){return state ? (state.inflight?[state.inflight]:[]).concat(st
 function barrier(){return pending().some(e=>!['accept','reject'].includes(e.action));}
 function editable(){return ready && args && args.review_enabled!==false && !barrier();}
 function status(text){$('status').textContent=text;height();}
+function diagnostic(stage,details){
+  if(!state?.diagnostics)return;
+  state.trace=(state.trace||[]).concat(Object.assign({stage},details)).slice(-40);
+  $('click-log').textContent=JSON.stringify(state.trace,null,2);
+}
 function controls(){
   const disabled=!ready || args?.review_enabled===false;
   for(const id of ['toggle','outline','clear','accept','reject'])$(id).disabled=disabled || barrier();
@@ -27,13 +33,15 @@ function controls(){
   $('resolve').disabled=disabled || barrier() || state?.mode!=='review';
   for(const id of ['undo','redo'])$(id).disabled=disabled || barrier();
   $('next').disabled=disabled;
-  for(const id of ['clickMode','viewMode','shortcuts','showIds','zoom'])$(id).disabled=!ready;
+  for(const id of ['clickMode','viewMode','shortcuts','showIds','zoom','diagnostics'])$(id).disabled=!ready;
   $('clickMode').disabled=disabled;
   $('save').disabled=disabled || pending().length>0 || state?.mode!=='outline' || state.points.length<3;
   canvas.dataset.pendingCount=String(pending().length);
   canvas.dataset.editorReady=String(ready);
   $('toggle').setAttribute('aria-pressed',String(state?.mode==='review'));
   $('outline').setAttribute('aria-pressed',String(state?.mode==='outline'));
+  $('mode-label').textContent=state?.mode==='outline'?'Outline mode · left-click adds boundary points':'Review mode · left-click approves / right-click rejects';
+  $('diagnostic-panel').hidden=!state?.diagnostics;
 }
 function visible(obj){return obj && (state.viewMode==='all' ||
   (state.viewMode==='hide_auto' ? obj.accepted || obj.manual!==null : obj.needs_review));}
@@ -43,6 +51,7 @@ function projected(){
     const obj=result.get(event.fiber_id);
     if(obj && ['accept','reject'].includes(event.action)){
       obj.manual=event.action==='accept'?'accepted':'rejected';
+      obj.approved=event.action==='accept';
       obj.accepted=event.action==='accept' && obj.can_accept;
       obj.category=obj.accepted?'accepted':event.action==='reject'?'rejected':obj.automatic_category;
       obj.reason=obj.accepted?'':event.action==='reject'?'manual_rejection':obj.automatic_reason;
@@ -68,9 +77,10 @@ function updateMetadata(){
   const saved=pending().length===0;
   $('review-progress').textContent=`Reviewed ${reviewed} / ${args.review_progress?.total||rows.length} detections (${rows.filter(visible).length} shown) · Selected measurable fibers: ${count} · ${saved?'All corrections saved':`${pending().length} saving — colors/counts are provisional`}`;
   canvas.dataset.reviewedCount=String(reviewed);
+  canvas.dataset.approvedFiberIds=JSON.stringify(rows.filter(o=>o.approved).map(o=>o.fiber_id).sort((a,b)=>a-b));
   const selected=objects.get(state.selected);
   const blocked=selected?.manual==='accepted' && !selected.accepted;
-  const decision=blocked?'human label accepted; NOT counted':selected?.category.replaceAll('_',' ');
+  const decision=blocked?'approved (green); NOT counted':selected?.category.replaceAll('_',' ');
   const reason=blocked?selected.accept_block_message||selected.reason:selected?.reason;
   $('selected').textContent=selected?`Fiber ${selected.fiber_id}: ${decision}${reason?' · '+reason:''}`:'Select a colored object. A: accept · R: reject · N: next unreviewed · Ctrl+Z / Ctrl+Y: undo / redo.';
   points();controls();height();
@@ -87,9 +97,9 @@ function paintRect(rect){
     if(!id)continue;
     const obj=objects.get(id);if(!visible(obj))continue;
     const p=(row*width+col)*4;
-    pixels[p]=Math.round(.4*pixels[p]+(obj.accepted?0:153));
-    pixels[p+1]=Math.round(.4*pixels[p+1]+(obj.accepted?153:0));
-    pixels[p+2]=Math.round(.4*pixels[p+2]);
+    const color=obj.approved?APPROVED_RGB:REJECTED_RGB;
+    for(let channel=0;channel<3;channel++)
+      pixels[p+channel]=Math.round((1-OVERLAY_OPACITY)*pixels[p+channel]+OVERLAY_OPACITY*color[channel]);
   }
   ctx.putImageData(data,x,y);
   if(state.showIds){
@@ -107,12 +117,13 @@ function paintObjects(ids){
     const bounds=assets.bounds.get(id);if(bounds)paintRect(bounds);
     const s=assets.sprites.get(id);if(s)paintRect([s.x,s.y,s.x+s.leader.width,s.y+s.leader.height]);
   }
+  diagnostic('redraw',{fiber_ids:Array.from(ids),layer:'segmentation mask',opacity:OVERLAY_OPACITY});
 }
 function reconcile(previous){
   objects=projected();
   const changed=new Set();
   for(const [id,obj] of objects){const old=previous.get(id);
-    if(!old || old.accepted!==obj.accepted || old.measurable!==obj.measurable ||
+    if(!old || old.approved!==obj.approved || old.accepted!==obj.accepted || old.measurable!==obj.measurable ||
        old.manual!==obj.manual || old.needs_review!==obj.needs_review ||
        // Confirmation must repaint even if the optimistic decision already
        // matches: a missed provisional draw must never become the saved view.
@@ -171,7 +182,10 @@ function enqueue(action,extra={}){
 }
 function classify(id,action,extra={}){
   if(!editable() || !visible(objects.get(id)))return;
+  const before=objects.get(id).approved;
   state.selected=id;enqueue(action,Object.assign({fiber_id:id},extra));
+  diagnostic('decision',{fiber_id:id,action,approved_before:before,approved_after:objects.get(id).approved,
+    included_in_measurements:objects.get(id).accepted && objects.get(id).measurable});
 }
 function focusSelected(){
   const bounds=assets.bounds.get(state.selected),scale=fit*Number(zoom.value)/100;
@@ -201,6 +215,10 @@ $('resolve').onclick=()=>{
 $('next').onclick=()=>selectNext();$('undo').onclick=()=>enqueue('undo');$('redo').onclick=()=>enqueue('redo');
 $('clickMode').onchange=e=>{state.clickMode=e.target.value;};
 $('shortcuts').onchange=e=>{state.shortcuts=e.target.checked;};
+$('diagnostics').onchange=e=>{
+  state.diagnostics=e.target.checked;controls();
+  $('click-log').textContent=JSON.stringify(state.trace||[],null,2);height();
+};
 $('viewMode').onchange=e=>{state.viewMode=e.target.value;paintRect([0,0,canvas.width,canvas.height]);updateMetadata();};
 $('showIds').onchange=e=>{state.showIds=e.target.checked;paintRect([0,0,canvas.width,canvas.height]);updateMetadata();};
 zoom.oninput=()=>{state.zoom=zoom.value;resize();};
@@ -218,11 +236,13 @@ canvas.onpointerup=e=>{
     state.points.push([x,y]);points();controls();return;
   }
   const id=assets.labels[Math.floor(y)*assets.width+Math.floor(x)],obj=objects.get(id);
+  diagnostic('click',{button,mode:state.mode,client_xy:[e.clientX,e.clientY],image_xy:[x,y],
+    fiber_id:id,approved_before:obj?.approved??false});
   if(!visible(obj)){
     state.selected=null;updateMetadata();
     status('No visible detected object at that pixel. Selection cleared; background never selects a neighbor.');return;
   }
-  const action=button===2?'reject':state.clickMode==='toggle' && obj.accepted?'reject':'accept';
+  const action=button===2?'reject':state.clickMode==='toggle' && obj.approved?'reject':'accept';
   if(button===0 || button===2)classify(id,action,{x,y});
 };
 canvas.onkeydown=e=>{
@@ -276,6 +296,7 @@ window.addEventListener('message',async event=>{
   state=shared.states.get(client);
   let notice=data.message||'';
   if(state.inflight && data.ack_token===state.inflight.token){
+    diagnostic('save-confirmed',{action:state.inflight.action,success:data.event_ok,fiber_id:state.inflight.fiber_id});
     if(state.inflight.action==='outline' && data.event_ok){
       state.points=[];
       if(state.resolving){
@@ -327,6 +348,7 @@ window.addEventListener('message',async event=>{
     for(const item of data.fiber_id_labels||[])state.layouts.set(item.fiber_id,item);
     $('clickMode').value=state.clickMode;$('viewMode').value=state.viewMode;$('shortcuts').checked=state.shortcuts;
     $('showIds').checked=state.showIds;zoom.value=state.zoom;
+    $('diagnostics').checked=!!state.diagnostics;$('click-log').textContent=JSON.stringify(state.trace||[],null,2);
     $('original-note').textContent=data.original_note||'';$('original-note').hidden=!data.original_note;
     ready=true;
     if(changed){objects=projected();paintRect([0,0,canvas.width,canvas.height]);updateMetadata();resize();

@@ -41,9 +41,10 @@ The primary view and detailed annotation show plain black `fiber_id` numbers,
 without a background plate, at a default glyph height of 14 original pixels,
 only for rows included in the measurement count. Match the printed number to the
 `fiber_id` column of the CSV opened in Excel, not the spreadsheet row number.
-Excluded objects have no callout. A manual acceptance that fails measurement
-eligibility remains red, with the human decision retained separately.
-The editor explicitly shows **human label accepted; NOT counted** when this
+Objects excluded from measurements have no callout. A manual acceptance that
+fails measurement eligibility is highlighted green but retains its exclusion
+reason and unavailable measurements.
+The editor explicitly shows **approved (green); NOT counted** when this
 happens. Missing length/diameter, reliable-sample availability and the number of
 endpoints explain an ambiguous mask. **Outline selected fiber** focuses the
 selected object and starts the existing outline tool. Save one correctly traced

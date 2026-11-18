@@ -20,7 +20,7 @@ Summary cards display existing saved-result fields:
 | --- | --- |
 | Total detections | `candidate_count` |
 | Reviewed objects | `manual_reviewed_count` |
-| Accepted fibers | `accepted_measurement_count` |
+| Measured fibers | `accepted_measurement_count` |
 | Excluded / review | `review_required_count` |
 
 Excluded / review includes automatic exclusions and review-required candidates;

@@ -38,7 +38,7 @@ manual perpendicular edge-to-edge width; real-image validation is still required
 
 | Category | Meaning |
 | --- | --- |
-| Accepted | Selected measurable fiber; green and included in measurements |
+| Accepted | Selected measurable fiber; included in measurements |
 | Rejected | Explicit human rejection; retained and red |
 | Out of Range | Measurable candidate outside the enabled research diameter range |
 | Too Small to Measure | Fails a configured length, area or mean-width screen |
@@ -53,7 +53,7 @@ method or confidence score is introduced by this feature.
 A human acceptance can override a research-range or classifier suggestion. It does
 not bypass configured minimum-size/reliability gates, excluded regions or missing
 geometry. Such a label is saved as `manual_classification=accepted`, but the object
-remains red and excluded with its reason. Adjust the threshold or accurately outline
+is green as a review approval, but excluded from measurements with its reason. Adjust the threshold or accurately outline
 a separated fiber if appropriate. Manual rejection is always retained distinctly
 from an automatic exclusion. Filtering does not create training examples.
 
@@ -75,7 +75,9 @@ objects without usable geometry remain unmeasurable in either crossing policy;
 - **Hide automatic exclusions** and **Only requiring manual review** change only
   visibility. Full CSV and QC exports still retain those detections.
 - Progress reports reviewed/total detections, detections shown and selected measurable
-  fibers. All final green fibers have IDs matching the exported `fiber_id` values.
+  fibers. Only eligible measured fibers have numeric callouts matching exported `fiber_id` values.
+  Green review approval is exported separately as `review_approved` and does not
+  fill missing measurements or change eligibility.
 
 Colors/counts update locally while saves are queued. Pending colors/counts are
 clearly provisional; wait for **All corrections saved** before exporting, changing

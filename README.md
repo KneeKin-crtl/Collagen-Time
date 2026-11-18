@@ -63,8 +63,12 @@ counts above the workspace. Raw summary data and detailed QC remain expandable.
 The presentation does not change scientific processing or saved review decisions.
 
 The analysis view is an interactive, full-resolution overlay on the original:
-**green** marks selected measurable fibers and **red** marks excluded detections,
-with automatic exclusions distinguished from manual rejection in the table.
+**green** is a #00FF00 tint over approved masks and **red** marks rejected or
+unapproved masks. Explicit saved human approval controls the highlight even when
+geometry or selection filters exclude the object from numerical measurements.
+The **Measured fibers** count and black ID callouts still require eligible
+measurements; green alone is not a measurement-validity claim. The CSV separates
+`review_approved` from `included_in_measurement_statistics`.
 Left-click to accept, right-click to reject; choose **Left click toggles** for the
 earlier behavior. A/R accept/reject the selected object; N advances through
 unreviewed objects. Undo/Redo and Ctrl+Z/Ctrl+Y preserve history. Enable/disable
@@ -72,6 +76,8 @@ keyboard shortcuts in the editor. Background clicks never select nearby objects.
 The selected ID and decision appear above the images, and the Accept/Reject
 buttons name their target ID. A temporary dashed box marks that object's bounds
 without changing exported images. Clicking background clears the toolbar target.
+See [approval highlights and click diagnostics](docs/approval-highlights.md) for
+the saved-state policy, measurement distinction and optional event trace.
 
 Under **Fiber selection and measurement eligibility**, configure optional diameter
 range (150–335 nm initially, **disabled by default**), minimum length in µm, area in
@@ -86,8 +92,10 @@ The editor queues rapid corrections and restores confirmed decisions on a failed
 save. Wait for **All corrections saved** before exporting, switching images or
 closing. Changing filters never reruns segmentation or centerline measurement.
 Each saved correction refreshes its object's color and ID visibility, including
-when the immediate provisional paint was missed. Acceptance still cannot bypass
-measurement eligibility; an ineligible fiber remains red with its reason shown.
+when the immediate provisional paint was missed. Approval cannot bypass
+measurement eligibility; an ineligible approved mask stays green with its reason
+and **NOT counted** status shown. The **Review mode / Outline mode** indicator
+always identifies whether a left-click approves a mask or adds an outline vertex.
 For an approved label whose mask has missing or branched geometry, the editor
 shows **NOT counted**, the available diagnostic details, and **Outline selected
 fiber**. Trace one separated boundary and save it to obtain measurements through
@@ -112,9 +120,9 @@ centerlines also use green/red. The scale-bar preview is in the sidebar's exclus
 controls. This tracked expander requires Streamlit 1.65 or newer (as pinned).
 
 Download CSV or a QC ZIP with original, segmentation, labels, detailed annotation
-and `count_overlay.tiff`, plus CSV, summary and analysis parameters. The saved
-count overlay uses the same per-ID decisions as the displayed primary view.
-Both exported annotated images retain the accepted ID labels; `fiber_id_labels.json`
+and `count_overlay.tiff`, plus CSV, summary and analysis parameters.
+`review_overlay.tiff` matches the primary approval view; `count_overlay.tiff`
+retains the measurement-inclusion view. Both retain measured-fiber ID labels; `fiber_id_labels.json`
 records each displayed ID, its source image, anchor and placement. Original images,
 instance masks, measurements and CSV fields are unchanged by labeling.
 Endpoints are JSON lists of `[x, y]` pixel coordinates. Missing measurements are

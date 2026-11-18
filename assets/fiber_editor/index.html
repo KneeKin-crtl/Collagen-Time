@@ -34,7 +34,9 @@
  <label><input id="shortcuts" type="checkbox" checked> Keyboard shortcuts</label>
  <label><input id="showIds" type="checkbox" checked> Show accepted fiber IDs</label>
  <label>Zoom <input aria-label="Zoom" id="zoom" type="range" min="50" max="800" value="100" step="25"> <span id="zoomLabel">100%</span></label>
+ <label><input id="diagnostics" type="checkbox"> Click diagnostics</label>
 </div>
+<div id="mode-label" role="status">Review mode · left-click approves / right-click rejects</div>
 <div id="selected" aria-live="polite">Select a colored object to inspect its category.</div>
 <div id="status" role="status">Left-click to accept, right-click to reject. Wait for all corrections to be saved before exporting or closing.</div>
 <div class="results-grid" aria-label="Microscope image comparison">
@@ -49,7 +51,8 @@
  </section>
 </div>
 <div id="review-progress" aria-live="polite"></div>
-<div class="legend"><span class="green">Green: accepted</span><span class="red">Red: excluded or manually rejected</span><span>Measurements unavailable for ambiguous geometry remain flagged.</span></div>
+<div class="legend"><span class="green">Green: approved mask (#00FF00 tint)</span><span class="red">Red: rejected or unapproved mask</span><span>Green approval does not guarantee usable measurements. Measurement counts and ID labels include measurable fibers only.</span></div>
+<details id="diagnostic-panel" hidden><summary>Click diagnostics (local, last 40 records)</summary><pre id="click-log"></pre></details>
 <script src="editor.js"></script>
 </body>
 </html>
