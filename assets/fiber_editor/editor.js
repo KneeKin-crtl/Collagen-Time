@@ -40,7 +40,8 @@ function controls(){
   canvas.dataset.editorReady=String(ready);
   $('toggle').setAttribute('aria-pressed',String(state?.mode==='review'));
   $('outline').setAttribute('aria-pressed',String(state?.mode==='outline'));
-  $('mode-label').textContent=state?.mode==='outline'?'Outline mode · left-click adds boundary points':'Review mode · left-click approves / right-click rejects';
+  $('mode-label').textContent=state?.mode==='outline'?'Outline mode · left-click adds boundary points':
+    state?.clickMode==='toggle'?'Review mode · left-click toggles approval / right-click rejects':'Review mode · left-click approves / right-click rejects';
   $('diagnostic-panel').hidden=!state?.diagnostics;
 }
 function visible(obj){return obj && (state.viewMode==='all' ||
@@ -213,7 +214,7 @@ $('resolve').onclick=()=>{
   status('Trace the actual boundary of one separated fiber, then Save outline. Its measurements will use the existing method; the original detection is retained.');
 };
 $('next').onclick=()=>selectNext();$('undo').onclick=()=>enqueue('undo');$('redo').onclick=()=>enqueue('redo');
-$('clickMode').onchange=e=>{state.clickMode=e.target.value;};
+$('clickMode').onchange=e=>{state.clickMode=e.target.value;controls();};
 $('shortcuts').onchange=e=>{state.shortcuts=e.target.checked;};
 $('diagnostics').onchange=e=>{
   state.diagnostics=e.target.checked;controls();
