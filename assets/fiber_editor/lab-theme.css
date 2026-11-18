@@ -1,0 +1,17 @@
+:root {
+  --lab-background: #F7F8F6;
+  --lab-surface: #FFFFFF;
+  --lab-heading: #17324D;
+  --lab-text: #334155;
+  --lab-muted: #64748B;
+  --lab-accent: #168566;
+  --lab-accent-soft: #E8F4ED;
+  --lab-border: #E2E8E5;
+  --lab-warning: #92661C;
+  --lab-warning-soft: #FBF5E8;
+  --lab-reject: #A34F4D;
+  --lab-reject-soft: #FAECEA;
+  --lab-font: "Segoe UI", -apple-system, BlinkMacSystemFont, Arial, sans-serif;
+  --lab-shadow: 0 2px 8px rgba(23, 50, 77, .035);
+  color-scheme: light;
+}

@@ -10,6 +10,7 @@ analysis = Analysis(
     hookspath=[str(root / 'packaging' / 'windows' / 'hooks')],
     datas=[(str(root / 'app.py'), '.'),
            (str(root / 'assets' / 'collagen.png'), 'assets'),
+           (str(root / 'assets' / 'lab-ui.css'), 'assets'),
            (str(root / 'assets' / 'fiber_editor'), 'assets/fiber_editor'),
            (str(root / 'assets' / 'collagen.ico'), 'assets')]
           + collect_data_files('streamlit') + copy_metadata('streamlit'),

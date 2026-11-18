@@ -93,7 +93,9 @@ def serve(port):
     sys.argv = ['streamlit', 'run', str(app_path()), '--server.address=127.0.0.1',
                 f'--server.port={port}', '--server.headless=true',
                 '--browser.gatherUsageStats=false', '--server.fileWatcherType=none',
-                '--global.developmentMode=false']
+                '--global.developmentMode=false', '--theme.base=light',
+                '--theme.primaryColor=#168566', '--theme.backgroundColor=#F7F8F6',
+                '--theme.secondaryBackgroundColor=#FFFFFF', '--theme.textColor=#334155']
     cli.main()
 
 

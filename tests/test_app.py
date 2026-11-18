@@ -52,7 +52,7 @@ def submit(app, calibration=.5, bright=True):
 def test_app_initial_render(uploads):
     app = AppTest.from_file(APP).run(timeout=30)
     assert not app.exception
-    assert app.title[0].value == 'Collagen Fiber Analyzer'
+    assert any('<h1>Collagen Fiber Analyzer</h1>' in e.proto.body for e in app.get('html'))
     assert widget(app, 'number_input', 'Calibration (µm/pixel)').value is None
 
 
