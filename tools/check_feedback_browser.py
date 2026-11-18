@@ -695,6 +695,8 @@ def main():
                         interactions(browser,url,root,output,network_latency_ms=args.network_latency_ms)
                     except Exception:
                         with suppress(Exception):
+                            (output/'failure-traceback.txt').write_text(traceback.format_exc(),encoding='utf-8')
+                        with suppress(Exception):
                             failed_page = browser.contexts[0].pages[-1]
                             failed_page.screenshot(path=str(output/'failure.png'),full_page=True)
                             (output/'failure-page.txt').write_text(failed_page.locator('body').inner_text(),encoding='utf-8')
@@ -715,6 +717,10 @@ if __name__=='__main__':
     try:
         main()
     except Exception:
+        if os.environ.get('GITHUB_ACTIONS')=='true':
+            # Public annotations remain readable when GitHub restricts raw logs.
+            detail=traceback.format_exc()[-5000:].replace('%','%25').replace('\r','%0D').replace('\n','%0A')
+            print('::error title=Packaged browser failure::'+detail,flush=True)
         if os.environ.get('GITHUB_STEP_SUMMARY'):
             with Path(os.environ['GITHUB_STEP_SUMMARY']).open('a',encoding='utf-8') as summary:
                 summary.write('### Packaged browser check failed\n\n```text\n' + traceback.format_exc()[-12000:] + '\n```\n')
