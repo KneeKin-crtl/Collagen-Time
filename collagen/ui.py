@@ -31,7 +31,7 @@ def summary_cards(summary):
     # These are existing saved-result fields, not new presentation calculations.
     cards=(('candidate_count','Total detections','', '<circle cx="6" cy="6" r="2"/><circle cx="18" cy="6" r="2"/><circle cx="6" cy="18" r="2"/><circle cx="18" cy="18" r="2"/>'),
            ('manual_reviewed_count','Reviewed objects','', '<path d="m4 12 5 5L20 6"/>'),
-           ('accepted_measurement_count','Accepted fibers','accepted', '<circle cx="12" cy="12" r="9"/><path d="m7 12 3 3 7-7"/>'),
+           ('accepted_measurement_count','Measured fibers','accepted', '<circle cx="12" cy="12" r="9"/><path d="m7 12 3 3 7-7"/>'),
            ('review_required_count','Excluded / review','excluded', '<circle cx="12" cy="12" r="9"/><path d="m8 8 8 8m0-8-8 8"/>'))
     items=[]
     for field,label,kind,icon in cards:
@@ -55,7 +55,7 @@ def empty_workspace():
 def measurement_table(table):
     """Order and label existing columns without changing table/export data."""
     first=['fiber_id','length_um','mean_diameter_um','diameter_sd_um','area_um2',
-           'review_status','included_in_measurement_statistics','exclusion_reason']
+           'review_approved','review_status','included_in_measurement_statistics','exclusion_reason']
     order=[name for name in first if name in table]+[name for name in table if name not in first]
     st.dataframe(table,hide_index=True,column_order=order,column_config={
         'fiber_id':st.column_config.NumberColumn('Fiber ID'),
@@ -63,5 +63,6 @@ def measurement_table(table):
         'mean_diameter_um':st.column_config.NumberColumn('Mean diameter (µm, approx.)'),
         'diameter_sd_um':st.column_config.NumberColumn('Diameter SD (µm)'),
         'area_um2':st.column_config.NumberColumn('Area (µm²)'),
+        'review_approved':st.column_config.CheckboxColumn('Review approved (green)'),
         'included_in_measurement_statistics':st.column_config.CheckboxColumn('Included in measurements'),
     })

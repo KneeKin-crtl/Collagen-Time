@@ -410,9 +410,9 @@ def interactions(browser, url, root, output, network_latency_ms=0):
     width=page.get_by_role('spinbutton',name='Minimum reliable mean width (pixels)',exact=True)
     width.fill('100');width.press('Tab')
     page.get_by_role('button',name='Analyze image',exact=True).click()
-    page.get_by_text('Some objects you marked as real fibers still fail measurement eligibility and remain red.',exact=False).wait_for()
+    page.get_by_text('Some green approved masks are excluded from measurements.',exact=False).wait_for()
     wait_saved()
-    wait_color(50,35,False)
+    wait_color(50,35,True)
     assert_ids([])
     assert original_pixels()==original_before or editor().locator('#original-image').evaluate(
         '(c)=>Array.from(c.getContext("2d").getImageData(500,500,1,1).data)')==[80,80,80,255]
@@ -519,10 +519,15 @@ def interactions(browser, url, root, output, network_latency_ms=0):
     page.get_by_role('button',name='Analyze image',exact=True).click()
     wait_saved()
     assert_ids([1,2])
+    editor().locator('#diagnostics').check()
+    expect(editor().locator('#mode-label')).to_contain_text('Review mode')
     click(310,205)
+    # Optimistic approval must be green before waiting for persistence, even
+    # though this object cannot enter the numerical measurement count.
+    assert color(310,205)[1]>color(310,205)[0]
     wait_saved()
-    assert color(310,205)[0]>color(310,205)[1]
-    expect(editor().locator('#selected')).to_contain_text('human label accepted; NOT counted')
+    assert color(310,205)[1]>color(310,205)[0]
+    expect(editor().locator('#selected')).to_contain_text('approved (green); NOT counted')
     expect(editor().locator('#selected')).to_contain_text('14 endpoints')
     expect(editor().locator('#selected')).to_contain_text('Length / Diameter unavailable')
     expect(editor().locator('#review-progress')).to_contain_text('Selected measurable fibers: 2')
@@ -530,7 +535,61 @@ def interactions(browser, url, root, output, network_latency_ms=0):
     blocked_rows=export_rows('blocked-approval.csv')
     assert blocked_rows[3]['manual_classification']=='accepted'
     assert blocked_rows[3]['included_in_measurement_statistics']=='False'
+    assert blocked_rows[3]['review_approved']=='True'
     assert blocked_rows[3]['length_um']==blocked_rows[3]['mean_diameter_um']==''
+    trace=json.loads(editor().locator('#click-log').text_content())
+    exact=[e for e in trace if e['stage']=='click' and e['fiber_id']==4][-1]
+    assert abs(exact['image_xy'][0]-310)<1 and abs(exact['image_xy'][1]-205)<1
+    assert any(e['stage']=='decision' and e['approved_after'] and not e['included_in_measurements'] for e in trace)
+    assert any(e['stage']=='redraw' and 4 in e['fiber_ids'] for e in trace)
+    assert color(350,170)==[80,80,80], 'Approval colored the bounding box instead of the segmented mask.'
+    editor().locator('#zoom').fill('400')
+    click(50,115)  # Approve a second ineligible mask using the zoomed mapping.
+    wait_color(50,115,True)
+    assert color(310,205)[1]>color(310,205)[0], 'A second approval erased the first.'
+    assert_ids([1,2])
+    approved=editor().locator('#image').get_attribute('data-approved-fiber-ids')
+    before_states=states()
+    click(500,500)
+    assert editor().locator('#image').get_attribute('data-approved-fiber-ids')==approved
+    assert states()==before_states
+    for show_ids in (False,True):
+        editor().locator('#showIds').set_checked(show_ids)
+        assert color(310,205)[1]>color(310,205)[0], 'A normal redraw erased approval.'
+    editor().locator('#viewMode').select_option('hide_auto')
+    assert color(310,205)[1]>color(310,205)[0]
+    editor().locator('#viewMode').select_option('all')
+    editor().get_by_role('button',name='Outline missed / merged fiber',exact=True).click()
+    expect(editor().locator('#mode-label')).to_contain_text('Outline mode')
+    click(700,300)
+    assert states()==before_states, 'Outline mode must not approve a background click.'
+    editor().locator('#clear').click()
+    editor().locator('#toggle').click()
+    editor().locator('#zoom').fill('100')
+    editor().locator('#clickMode').select_option('toggle')
+    expect(editor().locator('#mode-label')).to_contain_text('left-click toggles approval')
+    click(310,205);wait_color(310,205,False)
+    click(310,205);wait_color(310,205,True)
+    editor().locator('#clickMode').select_option('accept_reject')
+    click(310,205,button='right');wait_color(310,205,False)
+    click(310,205);wait_color(310,205,True)
+    (output/'approval-click-trace.json').write_text(editor().locator('#click-log').text_content(),encoding='utf-8')
+    # A new browser page must restore approval from SQLite, not from the old
+    # iframe, its bitmap, or its shared in-memory queue.
+    page.close()
+    page=new_analysis_page(browser,network_latency_ms)
+    page.on('pageerror',lambda error:errors.append(str(error)))
+    page.goto(url);page.get_by_text('Review ImageJ Excel workbook',exact=True).wait_for()
+    upload_image(root/'crossing.png')
+    calibration=page.get_by_role('spinbutton',name='Calibration (µm/pixel)',exact=True)
+    expect(calibration).to_have_value('')
+    calibration.fill('.5');calibration.press('Tab')
+    page.get_by_text('Bright fibers on dark background',exact=True).click()
+    page.get_by_role('button',name='Analyze image',exact=True).click()
+    wait_saved()
+    wait_color(310,205,True);wait_color(50,115,True)
+    assert_ids([1,2])
+    click(310,205);wait_saved()
     editor().get_by_role('button',name='Outline selected fiber',exact=True).click()
     for point in ((300,200),(600,200),(600,210),(300,210)):
         click(*point)
@@ -570,6 +629,9 @@ def interactions(browser, url, root, output, network_latency_ms=0):
                   background_clears_toolbar_target=True,
                   blocked_approval_explained=True,selected_outline_repair=True,
                   repaired_fiber_left_right_cycles=True,missing_geometry_never_fabricated=True,
+                  unmeasurable_approval_highlight=True,exact_mask_highlight=True,
+                  approval_survives_redraw_zoom_reopen=True,multiple_approvals_persist=True,
+                  click_diagnostics=True,interaction_mode_visible=True,
                   browser_errors=errors)
     (output/'report.json').write_text(json.dumps(report,indent=2),encoding='utf-8')
     print('Browser interaction checks passed',flush=True)
@@ -633,6 +695,8 @@ def main():
                         interactions(browser,url,root,output,network_latency_ms=args.network_latency_ms)
                     except Exception:
                         with suppress(Exception):
+                            (output/'failure-traceback.txt').write_text(traceback.format_exc(),encoding='utf-8')
+                        with suppress(Exception):
                             failed_page = browser.contexts[0].pages[-1]
                             failed_page.screenshot(path=str(output/'failure.png'),full_page=True)
                             (output/'failure-page.txt').write_text(failed_page.locator('body').inner_text(),encoding='utf-8')
@@ -653,6 +717,10 @@ if __name__=='__main__':
     try:
         main()
     except Exception:
+        if os.environ.get('GITHUB_ACTIONS')=='true':
+            # Public annotations remain readable when GitHub restricts raw logs.
+            detail=traceback.format_exc()[-5000:].replace('%','%25').replace('\r','%0D').replace('\n','%0A')
+            print('::error title=Packaged browser failure::'+detail,flush=True)
         if os.environ.get('GITHUB_STEP_SUMMARY'):
             with Path(os.environ['GITHUB_STEP_SUMMARY']).open('a',encoding='utf-8') as summary:
                 summary.write('### Packaged browser check failed\n\n```text\n' + traceback.format_exc()[-12000:] + '\n```\n')

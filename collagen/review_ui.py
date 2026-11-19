@@ -141,10 +141,10 @@ def reviewed_results(baseline, image_name, source_sha, filters=None):
 
     with st.expander('Analysis summary details'):
         st.json(result.summary)
-    st.caption(f"Green: {result.summary['accepted_measurement_count']} selected measurable fibers · Red: {result.summary['review_required_count']} excluded detections. Automatic exclusions and manual rejections have separate categories and reasons in the table and CSV. Detections and raw measurements are retained.")
+    st.caption(f"Green: {result.summary['review_approved_count']} approved masks · Measured fibers: {result.summary['accepted_measurement_count']}. Green approval and measurement eligibility are separate. CSV review_approved records the highlight; included_in_measurement_statistics records numerical inclusion. Detections and raw measurements are retained.")
     st.caption('Black ID labels identify only measurable accepted fibers and match fiber_id in the CSV opened in Excel. Zoom for dense areas, or hide IDs to inspect boundaries. Click the colored fiber itself to change its review decision.')
     if result.summary.get('manual_accepted_but_ineligible_count',0):
-        st.warning('Some objects you marked as real fibers still fail measurement eligibility and remain red. Inspect their exclusion reasons, adjust the selection thresholds, or outline a separated fiber. A review label cannot create missing or reliable geometry.')
+        st.warning('Some green approved masks are excluded from measurements. Inspect their exclusion reasons, adjust the selection thresholds, or outline a separated fiber. Approval does not create missing length or diameter values; these objects stay out of measured counts and statistics.')
     if result.summary['accepted_pending_measurement_count']:
         st.warning('Some accepted objects cannot provide reliable complete measurements. Their original QC flags are retained. Outline a separated individual fiber if appropriate; accepting a merged or truncated object does not reconstruct its missing centerline.')
 

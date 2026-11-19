@@ -49,6 +49,24 @@ def counted_candidates(table):
     return table['review_status'].eq('accepted')
 
 
+def review_approved_candidates(table):
+    """Saved review approval for mask color, independent of measurement gates.
+
+    Explicit human labels win over the automatic decision. Superseded/hidden
+    masks stay out of the current review layer while retaining their history.
+    Never use this flag to select numerical measurement aggregates.
+    """
+    approved=counted_candidates(table).copy()
+    if 'manual_classification' in table:
+        manual=table.manual_classification
+        approved=manual.eq('accepted').fillna(False) | (manual.isna() & approved)
+    if 'qc_flags' in table:
+        approved &= ~table.qc_flags.fillna('').astype(str).str.contains(r'(?:^|;)superseded_by_manual_outline(?:;|$)',regex=True)
+    if 'visible_in_overlay' in table:
+        approved &= table.visible_in_overlay.fillna(False).astype(bool)
+    return approved.astype(bool)
+
+
 def classify(measurement, border, area, min_area):
     flags = []
     if area < min_area:

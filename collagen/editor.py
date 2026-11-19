@@ -9,7 +9,7 @@ import streamlit as st
 import streamlit.components.v1 as components
 
 from .resources import resource_root
-from .quality import approval_block_details
+from .quality import approval_block_details, review_approved_candidates
 
 editor_path = resource_root() / 'assets' / 'fiber_editor'
 fiber_editor = components.declare_component('fiber_editor', path=str(editor_path))
@@ -88,7 +88,7 @@ def label_sprite(labels, item):
 def editor_objects(table):
     """Small changing decision records, separate from immutable image payloads."""
     objects=[]
-    for row in table.to_dict('records'):
+    for row,approved in zip(table.to_dict('records'),review_approved_candidates(table)):
         if not row.get('visible_in_overlay',True):
             continue
         category=row.get('selection_category','accepted' if row['review_status']=='accepted' else 'ambiguous')
@@ -110,6 +110,7 @@ def editor_objects(table):
         except (TypeError,ValueError):
             saved_event=0
         objects.append(dict(fiber_id=int(row['fiber_id']), accepted=row['review_status']=='accepted',
+                            approved=bool(approved),
                             measurable=bool(finite and not hard),
                             category=category, automatic_category=automatic,
                             manual=manual if isinstance(manual,str) else None,
