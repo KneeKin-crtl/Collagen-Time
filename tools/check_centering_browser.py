@@ -92,6 +92,24 @@ def interactions(browser,url,root,output,network_latency_ms=0):
     def shortcut(key):
         editor().locator('#image').evaluate('c=>c.focus({preventScroll:true})');page.keyboard.press(key);saved()
     def scroll():return editor().locator('#viewport').evaluate('v=>[v.scrollLeft,v.scrollTop]')
+    def reload_editor(orphaned_load=False):
+        # Recreate the viewer document and replay the host's last render. This
+        # deterministically exercises the refresh seen on the Windows runner.
+        captured=editor().locator('#image').evaluate('()=>args')
+        if orphaned_load:
+            editor().locator('#image').evaluate('''()=>{
+                const key=(args.client_key||'baseline')+':'+args.asset_key;
+                shared.assets.set(key,{promise:new Promise(()=>{}),owner:document});
+            }''')
+        epoch=editor().locator('#image').evaluate('()=>performance.timeOrigin')
+        page.locator('iframe[title*="fiber_editor"]').evaluate('f=>f.contentWindow.location.reload()')
+        page.wait_for_function('''old=>{
+            const w=document.querySelector('iframe[title*="fiber_editor"]')?.contentWindow;
+            return w&&w.performance.timeOrigin!==old&&w.document.getElementById('image')?.dataset.editorReady!==undefined;
+        }''',arg=epoch)
+        editor().locator('#image').evaluate('''(c,data)=>window.dispatchEvent(new MessageEvent('message',{
+            data:{type:'streamlit:render',args:data},source:window.parent,origin:window.parent.location.origin}))''',captured)
+        saved()
     open_image();centered(1)
     before=export('before.csv');source=editor().locator('#original-image').evaluate('c=>c.toDataURL()')
     assert len(before)==6 and states()==[(i,None) for i in range(1,7)]
@@ -104,6 +122,8 @@ def interactions(browser,url,root,output,network_latency_ms=0):
             assert value['mask']==int(value['active'])
             measurements.append(value)
             editor().locator('#next').click();saved()
+            if zoom=='50':
+                reload_editor();centered()
     print('All six targets centered at 50/100/150/400/800%, including all image edges',flush=True)
     select(3);curved=centered(3)
     assert curved['p']['source']=='centerline_midpoint' and curved['p']['x']>325 and curved['p']['y']<260
@@ -113,10 +133,13 @@ def interactions(browser,url,root,output,network_latency_ms=0):
     editor().locator('#viewport').evaluate('v=>{v.scrollLeft=0;v.scrollTop=0;}')
     editor().locator('#viewport').evaluate('async()=>{await new Promise(r=>requestAnimationFrame(()=>requestAnimationFrame(r)));}')
     manual=scroll()
+    reload_editor()
+    assert scroll()==manual,'Iframe restoration recentered a manually panned view'
     editor().locator('#showIds').uncheck();editor().locator('#showIds').check()
     export('navigation-only.csv');saved()
     assert scroll()==manual,'Unrelated rerender recentered a manually panned view'
     shortcut('c');centered(3)
+    reload_editor(orphaned_load=True);centered(3)
     for width in (800,1500):
         page.set_viewport_size(dict(width=width,height=1100));editor().locator('#center').click();centered(3)
     select(1);editor().locator('#viewMode').select_option('hide_auto');saved()
@@ -164,6 +187,8 @@ def interactions(browser,url,root,output,network_latency_ms=0):
         manual_navigation_preserved=True,explicit_center_button_and_shortcut=True,
         responsive_layout=True,filter_changes=True,failed_save_restores_center=True,
         measurements_unchanged=True,original_unchanged=True,reopened_review=True,
+        iframe_refresh_restores_center_trace=True,iframe_refresh_preserves_manual_pan=True,
+        orphaned_image_load_recovers=True,
         network_latency_ms=network_latency_ms,positions=measurements,browser_errors=errors),indent=2))
     print('Centering browser passed: decisions, mouse/keyboard, dropdown, filters, manual pan, failures, exports and reopening',flush=True)
 

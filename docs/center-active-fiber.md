@@ -66,3 +66,22 @@ use `--executable dist/CollagenFiberAnalyzer/CollagenFiberAnalyzer.exe` instead 
 `--python` to test a packaged build. The Windows workflows run the centering check
 alongside existing review and reference checks. These are software interaction
 tests on synthetic data, not evidence of real-image scientific accuracy.
+
+## Viewer refresh recovery
+
+The Windows centering check exposed an iframe-lifecycle problem: the completed
+centering key survives in parent-tab state, but the DOM marker used by diagnostics
+is lost with the old iframe. The unchanged-target path now restores that marker
+without moving a view the operator may have manually panned.
+
+A forced-refresh regression also exposed cached image-load promises owned by the
+old document. Reusing such a promise after iframe destruction can stall restoration.
+The cache now retains resolved geometry rather than completed iframe promises;
+only the current document can reuse an in-flight load. An abandoned load requests
+fresh immutable layers from the existing backend, without rerunning measurement.
+
+The browser check now reloads the actual viewer document, verifies centering and
+manual-pan preservation, and simulates an abandoned load to verify recovery. It
+retains the original centering tolerance and still checks actual on-screen offsets,
+mask identity, zoom, saved decisions and numerical exports. A missing diagnostic
+marker is never treated as evidence that measurements changed.

@@ -250,10 +250,22 @@ function activeFocusKey(){
   return ready && args.review_enabled!==false && state.mode==='review' && visible(objects.get(state.selected))?
     args.asset_key+':'+state.selected:null;
 }
+function recordCenterPoint(point){
+  canvas.dataset.centeredFiberId=String(state.selected);
+  canvas.dataset.centerPoint=JSON.stringify(point);
+}
 function center_on_active_fiber(force=false){
   if(!state)return;
   const key=activeFocusKey();
-  if(!force && state.centerKey===key && !state.centerPending)return;
+  if(!force && state.centerKey===key && !state.centerPending){
+    // The completed target and scroll live in the parent tab, while these DOM
+    // attributes belong to one iframe. Rehydrate its trace after replacement
+    // without moving a view the operator may have manually panned.
+    const point=key===null?null:assets.focusPoints.get(state.selected);
+    if(point)recordCenterPoint(point);
+    else {canvas.dataset.centeredFiberId='';delete canvas.dataset.centerPoint;}
+    return;
+  }
   state.centerKey=key;state.centerPending=key;
   if(centerFrame!==null){cancelAnimationFrame(centerFrame);centerFrame=null;}
   if(key===null){canvas.dataset.centeredFiberId='';delete canvas.dataset.centerPoint;return;}
@@ -266,8 +278,7 @@ function center_on_active_fiber(force=false){
     viewport.scrollLeft=canvas.offsetLeft+point.x*scale-viewport.clientWidth/2;
     viewport.scrollTop=canvas.offsetTop+point.y*scale-viewport.clientHeight/2;
     syncScroll(viewport,originalViewport);rememberScroll();state.centerPending=null;
-    canvas.dataset.centeredFiberId=String(state.selected);
-    canvas.dataset.centerPoint=JSON.stringify(point);
+    recordCenterPoint(point);
     diagnostic('center',{fiber_id:state.selected,x:point.x,y:point.y,source:point.source,zoom:Number(zoom.value)});
   });
 }
@@ -387,9 +398,19 @@ canvas.onkeydown=e=>{
   if(['n','arrowright','p','arrowleft'].includes(key)){e.preventDefault();selectNext(['p','arrowleft'].includes(key)?-1:1);}
 };
 function loadImage(url){return new Promise((resolve,reject)=>{const image=new window.parent.Image();image.onload=()=>resolve(image);image.onerror=()=>reject(new Error('Image layer could not load.'));image.src=url;});}
+function cachedAssetEntry(key){
+  const entry=shared.assets.get(key);
+  // An iframe-owned Promise can stop delivering callbacks after that document
+  // is replaced. Reuse resolved geometry, or a load owned by this document only.
+  if(entry && (typeof entry.then==='function' || (entry.promise && entry.owner!==document))){
+    shared.assets.delete(key);return null;
+  }
+  return entry;
+}
 async function loadAssets(data){
   const key=(data.client_key||'baseline')+':'+data.asset_key;
-  if(shared.assets.has(key))return shared.assets.get(key);
+  const cached=cachedAssetEntry(key);
+  if(cached)return cached.promise || cached;
   const promise=(async()=>{
     const [original,base,labelMap]=await Promise.all([data.original_image,data.base_image,data.label_map].map(loadImage));
     if(original.width!==base.width || original.height!==base.height || labelMap.width!==base.width || labelMap.height!==base.height)
@@ -411,10 +432,14 @@ async function loadAssets(data){
     mapCanvas.width=0;mapCanvas.height=0;
     return {original,baseCtx,width,height,labels,bounds,focusPoints:new Map((data.focus_points||[]).map(p=>[p.fiber_id,p])),sprites:new Map()};
   })();
-  shared.assets.set(key,promise);
+  const entry={promise,owner:document};shared.assets.set(key,entry);
   // Bound decoded image memory, retaining only the two most recent geometries.
   while(shared.assets.size>2)shared.assets.delete(shared.assets.keys().next().value);
-  try{return await promise;}catch(error){shared.assets.delete(key);throw error;}
+  try{
+    const result=await promise;
+    if(shared.assets.get(key)===entry)shared.assets.set(key,result);
+    return result;
+  }catch(error){if(shared.assets.get(key)===entry)shared.assets.delete(key);throw error;}
 }
 window.addEventListener('message',async event=>{
   if(event.source!==window.parent || event.data?.type!=='streamlit:render')return;
@@ -457,7 +482,7 @@ window.addEventListener('message',async event=>{
   }
   if(committedKey!==data.asset_key){ready=false;points();controls();}
   const cacheKey=client+':'+data.asset_key;
-  if(!shared.assets.has(cacheKey) && !data.base_image){
+  if(!cachedAssetEntry(cacheKey) && !data.base_image){
     ready=false;controls();status('Restoring cached image layers…');
     if(!state.assetRequest){
       state.assetRequest=window.crypto.randomUUID?window.crypto.randomUUID():Date.now()+'-assets';
