@@ -1,10 +1,12 @@
 from io import BytesIO
+from copy import deepcopy
 import hashlib
 import json
 from pathlib import Path
 from unittest.mock import patch
 
 import numpy as np
+import pandas as pd
 from openpyxl import Workbook
 import pytest
 import streamlit as st
@@ -26,7 +28,8 @@ def uploads(monkeypatch):
     files = {}
 
     def upload(label, **kwargs):
-        key = 'image' if label.startswith('Microscopy') else 'manual' if label.startswith('Optional') else 'workbook'
+        key = ('image' if label.startswith('Microscopy') else 'manual' if label.startswith('Optional') else
+               'reference' if label.startswith('Import independently') else 'workbook')
         if key not in files:
             return None
         name, data = files[key]
@@ -413,6 +416,43 @@ def test_canvas_selection_event_only_updates_cursor_not_saved_reviews(uploads):
     assert widget(app,'selectbox','Object ID').value==2
     assert review.store.revision==revision
     assert 'active visible object' in app.warning[0].value
+
+
+def test_scientific_reference_labels_and_masks_are_separate_from_operational_results(uploads):
+    from collagen.references import ReferenceStore
+    image=np.full((100,160),80,np.uint8);image[20:29,20:120]=200
+    uploads['image']=('reference-original.tiff',image_bytes(image))
+    app=submit(AppTest.from_file(APP).run(timeout=30))
+    before=app.dataframe[0].value.copy()
+    app.session_state['scientific_references']=True;app.run(timeout=30)
+    widget(app,'text_input','Reference reviewer').set_value('Synthetic reference reviewer')
+    widget(app,'selectbox','Independent reference category').set_value('valid_measurable_fiber')
+    widget(app,'text_input','Biological specimen ID (leave blank if unknown)').set_value('synthetic-specimen')
+    widget(app,'text_input','Acquisition group (leave blank if unknown)').set_value('synthetic-session')
+    widget(app,'button','Save selected detection category (not boundary truth)').click()
+    app.session_state['scientific_references']=True;app.run(timeout=30)
+    assert not app.exception and not app.error
+    review=app.session_state['_active_review'];doc=review.reference_document
+    assert len(doc['objects'])==1 and doc['objects'][0]['boundary_source']=='prediction_reference'
+    snapshot=deepcopy(doc['objects'][0]['original_prediction'])
+    assert snapshot['original_row']['review_status']=='accepted'
+    args=json.loads(app.main.get('component_instance')[0].proto.json_args)
+    assert args['reference_enabled'] and args['reference_context']
+    # Draw an independently traced missed reference on empty source pixels.
+    event=dict(action='reference_outline',token='independent-reference-1',context=review.context,
+               reference_context=args['reference_context'],points=[[20,60],[80,60],[80,68],[20,68]])
+    with patch('collagen.review_ui.fiber_editor',return_value=event):
+        app.session_state['scientific_references']=True;app.run(timeout=30)
+    assert not app.exception and not app.error
+    current=review.reference_store.load(review.image_key)
+    assert len(current['objects'])==2
+    assert current['objects'][1]['boundary_source']=='independent_manual'
+    assert current['objects'][1]['bbox_yxyx']==[60,20,69,81]
+    assert current['objects'][0]['original_prediction']==snapshot
+    assert review.store.history(review.analysis_key)==[]
+    pd.testing.assert_frame_equal(review.result.table,before)
+    assert np.array_equal(review.result.labels,review.baseline.labels)
+    assert ReferenceStore(review.store.directory).load(review.image_key)==current
 
 
 def test_physical_filters_change_eligibility_without_geometry_or_image_encoding(uploads):

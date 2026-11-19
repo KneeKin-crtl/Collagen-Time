@@ -111,7 +111,7 @@ and immutable training/evaluation membership per model version. No credentials,
 network service, GPU, or third-party model download is needed.
 An additive database migration preserves old reviews and adds the calibration,
 selection settings and selection reason active when each new correction was made.
-Undo/Redo retain that original context. Existing training/model gates are unchanged.
+Undo/Redo retain that original context. Existing promotion thresholds are retained; verified specimen/acquisition group safeguards now apply (see below).
 
 Re-upload the same original with the same segmentation/QC settings to restore
 corrections. Identity uses decoded pixel content, shape, dtype and analysis
@@ -129,8 +129,13 @@ application's backup button.
 
 ## Retraining and using the improved model
 
-Review at least **two training images and two separate evaluation images**, with
-at least **five accepted and five rejected examples in each role**. Select
+Review at least **two independent training groups and two separate evaluation
+groups**, with at least **two images and five accepted and five rejected examples
+in each role**. Record verified specimen and acquisition IDs in the Scientific
+validation panel; sharing either identity, including transitive links, blocks
+role separation. Final-test labels are automatically excluded from fitting and
+promotion evaluation; validation-split labels cannot enter fitting. Unknown group
+identities block training rather than treating filenames as independent specimens. Select
 **Retrain Model Using Corrections**. This trains a small CPU logistic classifier
 using shape, intensity contrast, pixel geometry, and QC features. Only current
 explicit human labels are targets; predictions are never added as training labels.
@@ -138,10 +143,10 @@ Each image contributes equally within each class to reduce domination by many
 fragments from a single image. Scaling is fitted on training examples only.
 
 The candidate, active model, and baseline are evaluated against the same held-out
-image examples. The candidate is promoted only if balanced accuracy improves by
+specimen/acquisition-disjoint examples. The candidate is promoted only if balanced accuracy improves by
 at least one percentage point over both comparators without lower accepted
 precision. Reports include false acceptance/rejection counts, class recall,
-precision, image IDs and sample counts. Changes to corrections during training
+precision, image IDs, sample counts and frozen group provenance. Changes to corrections during training
 block promotion until a fresh run. Insufficient data or a failed comparison keeps
 the existing model active. All candidate versions and exact labeled samples remain
 stored, including failed candidates. Previously approved versions can be restored,
@@ -172,3 +177,11 @@ restoration in a new browser session, persistent Undo and training prerequisites
 Both native Windows build workflows run this check against the packaged executable
 before uploading the application artifact. Playwright is a developer-only extra;
 it and the test browser are not bundled as application dependencies.
+
+## Independent reference annotations
+
+The [scientific validation guide](scientific-validation.md) documents four-way
+reference categories, independent/missed masks, versioned JSON and grouped reports.
+Those references are separate from operational binary corrections. Copied prediction
+masks are never treated as independent segmentation truth. No new real-data model
+or segmentation trainer was added; baseline scientific validation remains required.

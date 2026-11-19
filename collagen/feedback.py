@@ -325,6 +325,15 @@ class FeedbackStore:
                 JOIN analyses a ON o.analysis_key=a.analysis_key JOIN images i ON a.image_key=i.image_key
                 WHERE o.active=1 AND o.manual_classification IS NOT NULL AND i.role IS NOT NULL
                 ORDER BY o.state_event DESC''').fetchall()
+            references={}
+            if con.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='reference_versions'").fetchone():
+                for row in con.execute('''SELECT document_json FROM reference_versions r
+                    WHERE sequence=(SELECT MAX(sequence) FROM reference_versions s WHERE s.image_key=r.image_key)'''):
+                    doc=json.loads(row[0]);references[doc['image_key']]=doc
+            from .grouping import image_group_components
+            groups=image_group_components(references.values())
+            group_registry=[{k:d.get(k) for k in ('image_key','specimen_id','acquisition_group')}
+                            for d in references.values() if d.get('specimen_id') and d.get('acquisition_group')]
         # Same pixels/mask across parameter sets or filenames count as one example.
         seen, samples = set(), []
         for row in rows:
@@ -332,10 +341,17 @@ class FeedbackStore:
                 continue
             seen.add(row['mask_key'])
             m = json.loads(row['measurement'])
+            reference=references.get(row['image_key'],{})
+            # Operational review of a final-test image must not turn it into a
+            # fitting or model-selection example, regardless of a legacy role.
+            if reference.get('split')=='test':continue
             samples.append(dict(object_key=row['object_key'], event_id=row['state_event'],
                                 image_key=row['image_key'], role=row['role'], label=row['manual_classification'],
                                 features=json.loads(row['features']),
-                                baseline='accepted' if m['review_status'] == 'accepted' else 'rejected'))
+                                baseline='accepted' if m['review_status'] == 'accepted' else 'rejected',
+                                specimen_id=reference.get('specimen_id'),acquisition_group=reference.get('acquisition_group'),
+                                split_group=groups.get(row['image_key']),scientific_split=reference.get('split','unassigned'),
+                                reference_version_id=reference.get('version_id'),group_registry=group_registry))
         return revision, samples
 
     def active_model(self):

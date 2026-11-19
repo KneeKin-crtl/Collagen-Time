@@ -118,6 +118,21 @@ def validate_samples(samples):
     evaluation = {s['image_key'] for s in samples if s['role'] == 'evaluation'}
     if training & evaluation:
         raise ValueError('An image cannot be used for both fitting and evaluation.')
+    for s in samples:
+        if not all(s.get(k) for k in ('specimen_id','acquisition_group','split_group')):
+            raise ValueError('Record verified specimen and acquisition IDs for every reviewed image in Scientific validation before retraining.')
+        if s.get('scientific_split')=='test':
+            raise ValueError('Final-test images cannot be used for fitting or repeated model-promotion decisions.')
+        if s['role']=='training' and s.get('scientific_split')=='validation':
+            raise ValueError('Scientific validation images cannot be used for model fitting.')
+    for role in ('training','evaluation'):
+        if len({s['split_group'] for s in samples if s['role']==role})<2:
+            raise ValueError('At least two independent specimen/acquisition groups are required in each dataset role.')
+    for field in ('specimen_id','acquisition_group','split_group'):
+        fitted={s[field] for s in samples if s['role']=='training'}
+        held={s[field] for s in samples if s['role']=='evaluation'}
+        if fitted & held:
+            raise ValueError('Specimen/acquisition leakage between fitting and evaluation; keep connected groups together.')
 
 
 def retrain(store):
@@ -142,6 +157,10 @@ def retrain(store):
                   training_examples=len(training), evaluation_examples=len(evaluation),
                   training_images=sorted({s['image_key'] for s in training}),
                   evaluation_images=sorted({s['image_key'] for s in evaluation}),
+                  group_provenance=[{k:s[k] for k in ('image_key','role','specimen_id','acquisition_group',
+                                                     'split_group','scientific_split','reference_version_id')}
+                                    for s in {s['image_key']:s for s in samples}.values()],
+                  group_registry=samples[0].get('group_registry',[]),
                   candidate=candidate_metrics, incumbent=incumbent_metrics, baseline=baseline_metrics,
                   reason=('Passed: balanced accuracy improved by at least 1 percentage point without lower accepted precision.'
                           if approved else 'Not promoted: improvement and accepted-precision safeguards were not both met.'),
