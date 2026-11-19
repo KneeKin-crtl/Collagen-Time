@@ -418,6 +418,29 @@ def test_canvas_selection_event_only_updates_cursor_not_saved_reviews(uploads):
     assert 'active visible object' in app.warning[0].value
 
 
+def test_canvas_history_events_restore_authoritative_cursor_and_revision(uploads):
+    image=np.zeros((100,160),np.uint16)
+    image[20:29,20:120]=45000;image[40:49,20:120]=45000
+    uploads['image']=('history-cursor.tiff',image_bytes(image))
+    app=submit(AppTest.from_file(APP).run(timeout=30))
+    fields=['fiber_id','length_um','mean_diameter_um','calibration_um_per_px']
+    geometry=app.dataframe[0].value[fields].copy()
+    widget(app,'button','Mark accepted').click().run(timeout=30)
+    widget(app,'button','Mark rejected').click().run(timeout=30)
+    previous_revision=app.session_state['_active_review'].revision
+    for action,target in [('undo',2),('redo',None)]:
+        review=app.session_state['_active_review']
+        event=dict(action=action,token='history-cursor-'+action,context=review.context)
+        with patch('collagen.review_ui.fiber_editor',return_value=event) as component:app.run(timeout=30)
+        assert not app.exception
+        args=component.call_args.kwargs
+        assert args['selection_request']['fiber_id']==target
+        assert widget(app,'selectbox','Object ID').value==target
+        assert args['review_revision']>previous_revision
+        previous_revision=args['review_revision']
+        assert app.dataframe[0].value[fields].equals(geometry)
+
+
 def test_scientific_reference_labels_and_masks_are_separate_from_operational_results(uploads):
     from collagen.references import ReferenceStore
     image=np.full((100,160),80,np.uint8);image[20:29,20:120]=200

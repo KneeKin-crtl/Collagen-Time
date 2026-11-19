@@ -22,6 +22,7 @@
  <button id="reject" aria-label="Reject selected (R)">Reject selected (R)</button>
  <button id="resolve" hidden>Outline selected fiber</button>
  <button id="next">Next unreviewed (N)</button>
+ <button id="center">Center active fiber (C)</button>
  </div></div>
  <div class="tool-group history" role="group" aria-label="History controls">
  <span class="group-title">History</span><div class="button-row">
@@ -44,12 +45,12 @@
 <div class="results-grid" aria-label="Microscope image comparison">
  <section aria-labelledby="original-title">
   <h3 id="original-title">Original Microscope Image</h3>
-  <div id="original-viewport" class="viewport"><canvas id="original-image" aria-label="Original Microscope Image"></canvas></div>
+  <div id="original-viewport" class="viewport"><div class="image-stage" id="original-stage"><canvas id="original-image" aria-label="Original Microscope Image"></canvas></div></div>
   <p id="original-note" hidden></p>
  </section>
  <section aria-labelledby="analysis-title">
   <h3 id="analysis-title">AI Fiber Analysis</h3>
-  <div id="viewport" class="viewport"><canvas id="image" aria-label="Interactive fiber classification image" tabindex="0"></canvas><canvas id="outline-preview" aria-hidden="true"></canvas></div>
+  <div id="viewport" class="viewport"><div class="image-stage" id="analysis-stage"><canvas id="image" aria-label="Interactive fiber classification image" tabindex="0"></canvas><canvas id="outline-preview" aria-hidden="true"></canvas></div></div>
  </section>
 </div>
 <div id="review-progress" aria-live="polite"></div>

@@ -65,3 +65,11 @@ python tools/check_feedback_browser.py --python /path/to/python --network-latenc
 
 Use `--executable` on Windows for the packaged application. Tests use generated
 fixtures only and do not establish scientific measurement accuracy.
+
+## Active-target navigation
+
+New targets now center automatically using their existing centerline midpoint or
+a representative mask pixel, retaining zoom. Display-only padding permits border
+fibers to reach the center. Manual navigation remains until the target changes;
+use **Center active fiber (C)** to return explicitly. See
+[centering behavior and verification](center-active-fiber.md).

@@ -46,6 +46,12 @@ def editor_diagnostics(page):
                     pending:c?.dataset.pendingCount,context:c?.dataset.reviewContext,
                     ready:c?.dataset.editorReady,source:c?.dataset.sourceImage,
                     active:c?.dataset.activeFiberId,guided:c?.dataset.guidedReview,
+                    center:c?.dataset.centerPoint,
+                    scroll:c?Array.from([c.closest('.viewport').scrollLeft,c.closest('.viewport').scrollTop]):null,
+                    clickTrace:document.getElementById('click-log')?.textContent?.slice(-2200),
+                    cursor:typeof state==='object' && state?{selected:state.selected,revision:state.reviewRevision,
+                        selectionToken:state.selectionToken,initialized:state.reviewInitialized}:null,
+                    selectionRequest:typeof args==='object' && args?args.selection_request:null,
                     selected:document.getElementById('selected')?.textContent,
                     status:document.getElementById('status')?.textContent,
                     progress:document.getElementById('review-progress')?.textContent,
@@ -214,18 +220,29 @@ def interactions(browser, url, root, output, network_latency_ms=0):
                     wait_saved()
                     return
             time.sleep(.1)
-        raise AssertionError(('Color did not update',x,y,green,color(x,y)))
+        raise AssertionError(('Color did not update',x,y,green,color(x,y),editor_diagnostics(page)))
     def click(x,y,button='left'):
+        # A saved bitmap can precede the host's final layout/iframe update.
+        # Wait for that update before locating the actual hit-tested element.
+        wait_idle();wait_saved()
         canvas = editor().locator('#image')
         canvas.scroll_into_view_if_needed()
         canvas.evaluate('''(c,p)=>{
-            const v=c.parentElement,s=c.getBoundingClientRect().width/c.width;
-            v.scrollLeft=Math.max(0,p[0]*s-v.clientWidth/2);
-            v.scrollTop=Math.max(0,p[1]*s-v.clientHeight/2);
+            const v=c.closest('.viewport'),s=c.getBoundingClientRect().width/c.width;
+            v.scrollLeft=Math.max(0,c.offsetLeft+p[0]*s-v.clientWidth/2);
+            v.scrollTop=Math.max(0,c.offsetTop+p[1]*s-v.clientHeight/2);
         }''',[x,y])
-        box = canvas.bounding_box()
-        width,height = canvas.evaluate('(c)=>[c.width,c.height]')
-        page.mouse.click(box['x']+x*box['width']/width,box['y']+y*box['height']/height,button=button)
+        canvas.evaluate('''async c=>{
+            await new Promise(resolve=>{
+                let previous='',stable=0;
+                const tick=()=>{const r=c.getBoundingClientRect(),position=[r.x,r.y,r.width,r.height].join(',');
+                    stable=position===previous?stable+1:0;previous=position;
+                    if(stable>=4)resolve();else requestAnimationFrame(tick);
+                };requestAnimationFrame(tick);
+            });
+        }''')
+        scale=canvas.evaluate('c=>c.getBoundingClientRect().width/c.width')
+        canvas.click(position=dict(x=x*scale,y=y*scale),button=button)
     def states():
         with closing(sqlite3.connect(root/'data'/'feedback.sqlite3')) as con:
             return con.execute('SELECT fiber_id,manual_classification,active FROM objects ORDER BY fiber_id').fetchall()
@@ -241,9 +258,9 @@ def interactions(browser, url, root, output, network_latency_ms=0):
         editor().locator('#viewport').scroll_into_view_if_needed()
         c=editor().locator('#image')
         c.evaluate('''(c,p)=>{
-            const v=c.parentElement,s=c.getBoundingClientRect().width/c.width;
-            v.scrollLeft=Math.max(0,p[0]*s-v.clientWidth/2);
-            v.scrollTop=Math.max(0,p[1]*s-v.clientHeight/2);
+            const v=c.closest('.viewport'),s=c.getBoundingClientRect().width/c.width;
+            v.scrollLeft=Math.max(0,c.offsetLeft+p[0]*s-v.clientWidth/2);
+            v.scrollTop=Math.max(0,c.offsetTop+p[1]*s-v.clientHeight/2);
         }''',[x,y])
         box=c.bounding_box()
         sx,sy=box['x']+x*box['width']/1280,box['y']+y*box['height']/800
@@ -252,7 +269,10 @@ def interactions(browser, url, root, output, network_latency_ms=0):
 
     open_analysis(guided=True)
     def active(expected):
-        expect(editor().locator('#image')).to_have_attribute('data-active-fiber-id','' if expected is None else str(expected))
+        try:
+            expect(editor().locator('#image')).to_have_attribute('data-active-fiber-id','' if expected is None else str(expected))
+        except AssertionError as error:
+            raise AssertionError(('Active target mismatch',expected,editor_diagnostics(page))) from error
         expect(editor().locator('#outline-preview')).to_have_attribute('data-active-fiber-id','' if expected is None else str(expected))
         alignment=editor().locator('#outline-preview').evaluate('''p=>{
             const a=p.getBoundingClientRect(),b=document.getElementById('image').getBoundingClientRect();

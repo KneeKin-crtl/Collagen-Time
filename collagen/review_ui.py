@@ -55,6 +55,7 @@ def comparison_editor(result, review=None, image_name='', **kwargs):
     payload = {} if acknowledged else assets
     known_sprites = set(acknowledged.get('sprites', ()))
     return fiber_editor(**payload, asset_key=asset_key, objects=editor_objects(result.table),
+                        review_revision=int(review.revision) if review is not None else 0,
                         source_image=dict(name=image_name or getattr(review,'image_name',''),
                             sha256=result.parameters.get('source_sha256',''),
                             width=int(result.original.shape[1]),height=int(result.original.shape[0])),
@@ -161,6 +162,15 @@ def reviewed_results(baseline, image_name, source_sha, filters=None):
                 selected = save_reference_outline(review,event)
             else:
                 selected = review.handle_event(event, role)
+            if (event.get('action') in ('undo','redo') and selected
+                    and st.session_state.get('review-guided-' + key,True)):
+                # History changes must carry an authoritative cursor as well as
+                # new decisions; an iframe acknowledgement can be superseded.
+                review.refresh()
+                target=next_review_object(review.result.table,
+                    view_mode=st.session_state.get('review-view-' + key,'all'))
+                st.session_state[selected_key]=target
+                st.session_state[selection_key]=dict(token=uuid.uuid4().hex,fiber_id=target)
             if event.get('action') in ('toggle', 'accept', 'reject', 'outline'):
                 target = event.get('next_fiber_id') if 'next_fiber_id' in event else int(selected)
                 if target is not None and (isinstance(target, bool) or not isinstance(target, int)
@@ -195,7 +205,7 @@ def reviewed_results(baseline, image_name, source_sha, filters=None):
         st.warning('Some accepted objects cannot provide reliable complete measurements. Their original QC flags are retained. Outline a separated individual fiber if appropriate; accepting a merged or truncated object does not reconstruct its missing centerline.')
 
     with st.expander('Review by object ID and save confirmations', expanded=False):
-        st.caption(f'Object classifier: {model_name}. Left-click to accept; right-click to reject. A/R accept/reject the selected object, N advances, Ctrl+Z undoes and Ctrl+Y redoes. Choose Toggle mode for the earlier click behavior. Background never selects a neighbor.')
+        st.caption(f'Object classifier: {model_name}. Left-click to accept; right-click to reject. A/R accept/reject the selected object, N advances, C centers the active fiber, Ctrl+Z undoes and Ctrl+Y redoes. Choose Toggle mode for the earlier click behavior. Background never selects a neighbor.')
         ids = result.table.fiber_id.tolist()
         if st.session_state.get(selected_key) is not None and st.session_state.get(selected_key) not in ids:
             st.session_state[selected_key] = None

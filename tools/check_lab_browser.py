@@ -142,7 +142,7 @@ def interactions(browser,url,root,output,network_latency_ms=0):
     # The new live cards must reflect confirmed existing decisions, not a
     # different visual-only count. Exercise an actual right click after resizing.
     frame.locator('#viewport').scroll_into_view_if_needed()
-    canvas.evaluate('''c=>{const v=c.parentElement;v.scrollLeft=0;v.scrollTop=0;}''')
+    canvas.evaluate('''c=>{const v=c.closest('.viewport');v.scrollLeft=c.offsetLeft;v.scrollTop=c.offsetTop;}''')
     scale=canvas.evaluate('c=>c.getBoundingClientRect().width/c.width')
     canvas.click(position=dict(x=50*scale,y=35*scale),button='right')
     saved()
