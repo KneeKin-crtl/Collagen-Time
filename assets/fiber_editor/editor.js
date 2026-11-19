@@ -9,7 +9,7 @@ const zoom=$('zoom');
 const APPROVED_RGB=[0,255,0],REJECTED_RGB=[255,0,0],OVERLAY_OPACITY=.6;
 const ACTIVE_REVIEW_RGB=[0,0,139]; // DarkBlue; transient preview layer only.
 let args=null,state=null,assets=null,committedKey=null,objects=new Map(),origin='*',generation=0,ready=false,fit=1,down=null,lastHeight=0;
-let activeMask=null;
+let activeMask=null,centerFrame=null;
 // Streamlit may replace an iframe during reruns. Keep the queue and decoded
 // layers in this browser tab so replacement cannot lose queued review events.
 const shared=window.parent.__collagenReview || (window.parent.__collagenReview={states:new Map(),assets:new Map()});
@@ -37,6 +37,7 @@ function controls(){
   $('resolve').disabled=disabled || barrier() || state?.mode!=='review';
   for(const id of ['undo','redo'])$(id).disabled=disabled || barrier() || state?.mode==='reference';
   $('next').disabled=disabled || barrier() || state?.mode!=='review';
+  $('center').disabled=!ready || args?.review_enabled===false || state?.mode!=='review' || !visible(objects.get(state?.selected));
   for(const id of ['clickMode','viewMode','shortcuts','showIds','zoom','diagnostics','guided'])$(id).disabled=!ready;
   $('guided').disabled=disabled || barrier();
   $('clickMode').disabled=disabled;
@@ -117,7 +118,7 @@ function updateMetadata(){
     nextReviewId()===null?'No unreviewed fibers remain in the current view.':'Press Next unreviewed to resume guided review.' :
     'Select a colored object. A: accept · R: reject · N: next unreviewed · Ctrl+Z / Ctrl+Y: undo / redo.';
   $('selected').textContent=selected?`Fiber ${selected.fiber_id}: ${decision}${reason?' · '+reason:''}`:guidance;
-  points();controls();height();
+  points();controls();height();center_on_active_fiber();
 }
 function intersects(a,b){return a[0]<b[2] && b[0]<a[2] && a[1]<b[3] && b[1]<a[3];}
 function paintRect(rect){
@@ -223,16 +224,53 @@ function syncScroll(source,target){
 function resize(){
   if(!assets)return;
   const oldScale=parseFloat(canvas.style.width)/canvas.width || fit;
-  const cx=(viewport.scrollLeft+viewport.clientWidth/2)/oldScale,cy=(viewport.scrollTop+viewport.clientHeight/2)/oldScale;
+  const cx=(viewport.scrollLeft+viewport.clientWidth/2-canvas.offsetLeft)/oldScale;
+  const cy=(viewport.scrollTop+viewport.clientHeight/2-canvas.offsetTop)/oldScale;
   fit=Math.min(1,Math.max(1,Math.min(viewport.clientWidth,originalViewport.clientWidth)-2)/assets.width);
   const scale=fit*Number(zoom.value)/100;
-  for(const c of [canvas,originalCanvas,preview]){c.style.width=assets.width*scale+'px';c.style.height=assets.height*scale+'px';}
   for(const v of [viewport,originalViewport])v.style.height=Math.min(600,assets.height*fit+2)+'px';
-  viewport.scrollLeft=Math.max(0,cx*scale-viewport.clientWidth/2);viewport.scrollTop=Math.max(0,cy*scale-viewport.clientHeight/2);
+  // Padding belongs to the display stage, never to image/mask coordinates.
+  const padX=Math.min(viewport.clientWidth,originalViewport.clientWidth)/2;
+  const padY=Math.min(viewport.clientHeight,originalViewport.clientHeight)/2;
+  for(const stage of [$('analysis-stage'),$('original-stage')]){
+    stage.style.width=assets.width*scale+2*padX+'px';stage.style.height=assets.height*scale+2*padY+'px';
+  }
+  for(const c of [canvas,originalCanvas,preview]){
+    c.style.width=assets.width*scale+'px';c.style.height=assets.height*scale+'px';
+    c.style.left=padX+'px';c.style.top=padY+'px';
+  }
+  viewport.scrollLeft=Math.max(0,padX+cx*scale-viewport.clientWidth/2);
+  viewport.scrollTop=Math.max(0,padY+cy*scale-viewport.clientHeight/2);
   syncScroll(viewport,originalViewport);$('zoomLabel').textContent=zoom.value+'%';points();height();
 }
-viewport.onscroll=()=>{syncScroll(viewport,originalViewport);if(state){state.scroll=[viewport.scrollLeft,viewport.scrollTop];}};
-originalViewport.onscroll=()=>syncScroll(originalViewport,viewport);
+function rememberScroll(){if(state)state.scroll=[viewport.scrollLeft,viewport.scrollTop];}
+viewport.onscroll=()=>{syncScroll(viewport,originalViewport);rememberScroll();};
+originalViewport.onscroll=()=>{syncScroll(originalViewport,viewport);rememberScroll();};
+function activeFocusKey(){
+  return ready && args.review_enabled!==false && state.mode==='review' && visible(objects.get(state.selected))?
+    args.asset_key+':'+state.selected:null;
+}
+function center_on_active_fiber(force=false){
+  if(!state)return;
+  const key=activeFocusKey();
+  if(!force && state.centerKey===key && !state.centerPending)return;
+  state.centerKey=key;state.centerPending=key;
+  if(centerFrame!==null){cancelAnimationFrame(centerFrame);centerFrame=null;}
+  if(key===null){canvas.dataset.centeredFiberId='';delete canvas.dataset.centerPoint;return;}
+  // Coalesce rapid target changes and wait until updated layout is measurable.
+  // Confirmation rerenders of the same target preserve manually chosen scroll.
+  centerFrame=requestAnimationFrame(()=>{
+    centerFrame=null;if(activeFocusKey()!==key)return;
+    const point=assets.focusPoints.get(state.selected);if(!point)return;
+    const scale=canvas.getBoundingClientRect().width/assets.width;
+    viewport.scrollLeft=canvas.offsetLeft+point.x*scale-viewport.clientWidth/2;
+    viewport.scrollTop=canvas.offsetTop+point.y*scale-viewport.clientHeight/2;
+    syncScroll(viewport,originalViewport);rememberScroll();state.centerPending=null;
+    canvas.dataset.centeredFiberId=String(state.selected);
+    canvas.dataset.centerPoint=JSON.stringify(point);
+    diagnostic('center',{fiber_id:state.selected,x:point.x,y:point.y,source:point.source,zoom:Number(zoom.value)});
+  });
+}
 function pump(){
   if(!ready || state.inflight || !state.queue.length)return;
   state.inflight=Object.assign(state.queue.shift(),{context:args.context,asset_key:args.asset_key,
@@ -261,13 +299,7 @@ function classify(id,action,extra={}){
   diagnostic('decision',{fiber_id:id,action,approved_before:before,approved_after:objects.get(id).approved,
     included_in_measurements:objects.get(id).accepted && objects.get(id).measurable});
 }
-function focusSelected(){
-  const bounds=assets.bounds.get(state.selected),scale=fit*Number(zoom.value)/100;
-  if(!bounds)return;
-  viewport.scrollLeft=Math.max(0,(bounds[0]+bounds[2])/2*scale-viewport.clientWidth/2);
-  viewport.scrollTop=Math.max(0,(bounds[1]+bounds[3])/2*scale-viewport.clientHeight/2);
-  syncScroll(viewport,originalViewport);
-}
+function focusSelected(){center_on_active_fiber();}
 function selectNext(direction=1){
   if(!ready || args.review_enabled===false || barrier() || state.mode!=='review')return;
   if(state.guided){
@@ -297,6 +329,7 @@ $('resolve').onclick=()=>{
   focusSelected();setMode('outline');state.resolving=true;canvas.focus({preventScroll:true});
   status('Trace the actual boundary of one separated fiber, then Save outline. Its measurements will use the existing method; the original detection is retained.');
 };
+$('center').onclick=()=>center_on_active_fiber(true);
 $('next').onclick=()=>selectNext();$('undo').onclick=()=>enqueue('undo');$('redo').onclick=()=>enqueue('redo');
 $('clickMode').onchange=e=>{state.clickMode=e.target.value;controls();};
 $('shortcuts').onchange=e=>{state.shortcuts=e.target.checked;};
@@ -348,6 +381,7 @@ canvas.onkeydown=e=>{
   }
   if(e.ctrlKey||e.metaKey||e.altKey)return;
   if(key==='backspace' && ['outline','reference'].includes(state.mode) && editable()){e.preventDefault();state.points.pop();points();controls();}
+  if(key==='c' && state.mode==='review'){e.preventDefault();center_on_active_fiber(true);}
   if(key==='a'){e.preventDefault();classify(state.selected,'accept');}
   if(key==='r'){e.preventDefault();classify(state.selected,'reject');}
   if(['n','arrowright','p','arrowleft'].includes(key)){e.preventDefault();selectNext(['p','arrowleft'].includes(key)?-1:1);}
@@ -375,7 +409,7 @@ async function loadAssets(data){
         else bounds.set(id,[x,y,x+1,y+1]);}
     }
     mapCanvas.width=0;mapCanvas.height=0;
-    return {original,baseCtx,width,height,labels,bounds,sprites:new Map()};
+    return {original,baseCtx,width,height,labels,bounds,focusPoints:new Map((data.focus_points||[]).map(p=>[p.fiber_id,p])),sprites:new Map()};
   })();
   shared.assets.set(key,promise);
   // Bound decoded image memory, retaining only the two most recent geometries.
@@ -482,4 +516,7 @@ if(!shared.unloadHandler){
   });shared.unloadHandler=true;
 }
 window.addEventListener('resize',resize);
+// Column/sidebar changes do not always resize the iframe window.
+const layoutObserver=new ResizeObserver(resize);
+layoutObserver.observe(viewport);layoutObserver.observe(originalViewport);
 controls();post('streamlit:componentReady',{apiVersion:1});height();

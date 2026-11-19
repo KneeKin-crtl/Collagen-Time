@@ -10,6 +10,7 @@ on:
       - 'tools/check_feedback_browser.py'
       - 'tools/check_lab_browser.py'
       - 'tools/check_scientific_browser.py'
+      - 'tools/check_centering_browser.py'
       - '.streamlit/config.toml'
       - 'app.py'
       - 'collagen/**'
@@ -60,6 +61,8 @@ jobs:
         run: python tools/check_lab_browser.py --executable dist/CollagenFiberAnalyzer/CollagenFiberAnalyzer.exe --output-dir feedback-browser-results/lab-ui
       - name: Check packaged independent reference annotations
         run: python tools/check_scientific_browser.py --executable dist/CollagenFiberAnalyzer/CollagenFiberAnalyzer.exe --network-latency-ms 250 --output-dir feedback-browser-results/scientific
+      - name: Check packaged active fiber centering
+        run: python tools/check_centering_browser.py --executable dist/CollagenFiberAnalyzer/CollagenFiberAnalyzer.exe --network-latency-ms 250 --output-dir feedback-browser-results/centering
       - name: Upload browser failure diagnostics
         if: failure()
         uses: actions/upload-artifact@v4

@@ -251,3 +251,7 @@ Background subtraction and hysteresis are opt-in conventional experiments. Exist
 geometry, calibration, operational review and export rules remain. No new real-data
 model was trained; existing object-classifier promotion now requires verified group
 separation. Optional plots: `python -m pip install -r requirements-validation.lock.txt -e ".[validation]"`.
+
+Guided review now [centers each active fiber](docs/center-active-fiber.md) at the
+current zoom, including fibers at image borders. Use **Center active fiber (C)**
+to return after manual navigation; source coordinates and measurements are unchanged.

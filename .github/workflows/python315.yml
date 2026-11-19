@@ -3,7 +3,7 @@ name: Experimental Python 3.15
 on:
   workflow_dispatch:
   push:
-    branches: ['python315-compatibility', 'interactive-fiber-feedback', 'accepted-fiber-id-labels', 'compare-original-analysis', 'fiber-selection-review-speed', 'fix-editor-image-transition', 'fix-review-overlay-feedback', 'fix-left-click-approval', 'clean-research-lab-ui', 'fix-persistent-approval-highlights', 'active-fiber-review-highlight', 'scientific-validation-workflow']
+    branches: ['python315-compatibility', 'interactive-fiber-feedback', 'accepted-fiber-id-labels', 'compare-original-analysis', 'fiber-selection-review-speed', 'fix-editor-image-transition', 'fix-review-overlay-feedback', 'fix-left-click-approval', 'clean-research-lab-ui', 'fix-persistent-approval-highlights', 'active-fiber-review-highlight', 'scientific-validation-workflow', 'center-active-fiber']
   pull_request:
     paths:
       - 'requirements-python315.lock.txt'
@@ -18,6 +18,7 @@ on:
       - 'tools/check_feedback_browser.py'
       - 'tools/check_lab_browser.py'
       - 'tools/check_scientific_browser.py'
+      - 'tools/check_centering_browser.py'
       - '.streamlit/config.toml'
 
 permissions:
@@ -83,6 +84,9 @@ jobs:
       - name: Check packaged independent reference annotations
         if: runner.os == 'Windows'
         run: python tools/check_scientific_browser.py --executable dist/CollagenFiberAnalyzer/CollagenFiberAnalyzer.exe --network-latency-ms 250 --output-dir feedback-browser-results/scientific
+      - name: Check packaged active fiber centering
+        if: runner.os == 'Windows'
+        run: python tools/check_centering_browser.py --executable dist/CollagenFiberAnalyzer/CollagenFiberAnalyzer.exe --network-latency-ms 250 --output-dir feedback-browser-results/centering
       - name: Upload browser failure diagnostics
         if: failure() && runner.os == 'Windows'
         uses: actions/upload-artifact@v6

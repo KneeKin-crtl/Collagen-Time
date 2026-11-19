@@ -219,9 +219,9 @@ def interactions(browser, url, root, output, network_latency_ms=0):
         canvas = editor().locator('#image')
         canvas.scroll_into_view_if_needed()
         canvas.evaluate('''(c,p)=>{
-            const v=c.parentElement,s=c.getBoundingClientRect().width/c.width;
-            v.scrollLeft=Math.max(0,p[0]*s-v.clientWidth/2);
-            v.scrollTop=Math.max(0,p[1]*s-v.clientHeight/2);
+            const v=c.closest('.viewport'),s=c.getBoundingClientRect().width/c.width;
+            v.scrollLeft=Math.max(0,c.offsetLeft+p[0]*s-v.clientWidth/2);
+            v.scrollTop=Math.max(0,c.offsetTop+p[1]*s-v.clientHeight/2);
         }''',[x,y])
         box = canvas.bounding_box()
         width,height = canvas.evaluate('(c)=>[c.width,c.height]')
@@ -241,9 +241,9 @@ def interactions(browser, url, root, output, network_latency_ms=0):
         editor().locator('#viewport').scroll_into_view_if_needed()
         c=editor().locator('#image')
         c.evaluate('''(c,p)=>{
-            const v=c.parentElement,s=c.getBoundingClientRect().width/c.width;
-            v.scrollLeft=Math.max(0,p[0]*s-v.clientWidth/2);
-            v.scrollTop=Math.max(0,p[1]*s-v.clientHeight/2);
+            const v=c.closest('.viewport'),s=c.getBoundingClientRect().width/c.width;
+            v.scrollLeft=Math.max(0,c.offsetLeft+p[0]*s-v.clientWidth/2);
+            v.scrollTop=Math.max(0,c.offsetTop+p[1]*s-v.clientHeight/2);
         }''',[x,y])
         box=c.bounding_box()
         sx,sy=box['x']+x*box['width']/1280,box['y']+y*box['height']/800

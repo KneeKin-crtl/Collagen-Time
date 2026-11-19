@@ -58,7 +58,63 @@ def editor_assets(result):
         encoded[...,channel] = (labels >> (channel * 8)) & 255
     original, note = original_preview(result.original)
     return dict(original_image=original, original_note=note,
-                base_image=image_url(display_rgb(result.original)), label_map=image_url(encoded))
+                base_image=image_url(display_rgb(result.original)), label_map=image_url(encoded),
+                focus_points=review_focus_points(result))
+
+
+def centerline_midpoint(points):
+    """Display-only weighted midpoint of an existing connected open skeleton.
+
+    Use the measurement graph's corner rule without rerunning segmentation,
+    skeletonization or measurements. Branched/cyclic/disconnected paths fall back
+    to an actual mask pixel in review_focus_points.
+    """
+    pixels=set(map(tuple,points))
+    if len(pixels)<2:return None
+    graph={}
+    for y,x in pixels:
+        edges=[]
+        for dy in (-1,0,1):
+            for dx in (-1,0,1):
+                q=(y+dy,x+dx)
+                if (dy==dx==0) or q not in pixels:continue
+                if dy and dx and ((y,x+dx) in pixels or (y+dy,x) in pixels):continue
+                edges.append(q)
+        if len(edges)>2:return None
+        graph[(y,x)]=edges
+    ends=sorted(p for p,edges in graph.items() if len(edges)==1)
+    if len(ends)!=2:return None
+    path=[ends[0]];previous=None
+    while True:
+        choices=[q for q in graph[path[-1]] if q!=previous]
+        if not choices:break
+        previous=path[-1];path.append(choices[0])
+        if len(path)>len(pixels):return None
+    if len(path)!=len(pixels):return None
+    path=np.asarray(path,float)
+    steps=np.linalg.norm(np.diff(path,axis=0),axis=1)
+    cumulative=np.r_[0.,np.cumsum(steps)];half=cumulative[-1]/2
+    edge=min(int(np.searchsorted(cumulative,half,side='right'))-1,len(steps)-1)
+    y,x=path[edge]+(path[edge+1]-path[edge])*(half-cumulative[edge])/steps[edge]
+    return [float(x+.5),float(y+.5)]
+
+
+def review_focus_points(result):
+    """Immutable original-pixel navigation anchors, never ID-text positions."""
+    from scipy.ndimage import find_objects
+    anchors=[];lines=getattr(result,'centerlines',{})
+    for fid,box in enumerate(find_objects(result.labels),1):
+        if box is None:continue
+        points=lines.get(fid)
+        anchor=centerline_midpoint(points) if points is not None else None
+        source='centerline_midpoint'
+        if anchor is None:
+            points=np.argwhere(result.labels[box]==fid)
+            point=points[np.argmin(np.sum((points-points.mean(axis=0))**2,axis=1))]
+            anchor=[float(point[1]+box[1].start+.5),float(point[0]+box[0].start+.5)]
+            source='mask_representative'
+        anchors.append(dict(fiber_id=fid,x=anchor[0],y=anchor[1],source=source))
+    return anchors
 
 
 def label_sprite(labels, item):

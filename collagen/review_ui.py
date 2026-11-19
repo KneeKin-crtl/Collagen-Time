@@ -195,7 +195,7 @@ def reviewed_results(baseline, image_name, source_sha, filters=None):
         st.warning('Some accepted objects cannot provide reliable complete measurements. Their original QC flags are retained. Outline a separated individual fiber if appropriate; accepting a merged or truncated object does not reconstruct its missing centerline.')
 
     with st.expander('Review by object ID and save confirmations', expanded=False):
-        st.caption(f'Object classifier: {model_name}. Left-click to accept; right-click to reject. A/R accept/reject the selected object, N advances, Ctrl+Z undoes and Ctrl+Y redoes. Choose Toggle mode for the earlier click behavior. Background never selects a neighbor.')
+        st.caption(f'Object classifier: {model_name}. Left-click to accept; right-click to reject. A/R accept/reject the selected object, N advances, C centers the active fiber, Ctrl+Z undoes and Ctrl+Y redoes. Choose Toggle mode for the earlier click behavior. Background never selects a neighbor.')
         ids = result.table.fiber_id.tolist()
         if st.session_state.get(selected_key) is not None and st.session_state.get(selected_key) not in ids:
             st.session_state[selected_key] = None
