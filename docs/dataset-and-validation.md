@@ -3,7 +3,7 @@
 Target workstation: Windows 11 Pro, Intel i9-13900, 64 GB RAM, NVIDIA RTX 4090.
 The application preserves its conventional CPU segmentation and measurements.
 No pretrained model or CUDA dependency is included. An experimental object
-classifier can be trained from reviewed corrections with separate held-out images;
+classifier can be trained from reviewed corrections with verified, separate specimen/acquisition groups;
 see [manual review and learning](feedback-learning.md). Segmentation-model training
 and scientific accuracy claims still require real-image validation and reviewed masks.
 
@@ -33,7 +33,8 @@ perform fiber matching automatically.
 Record micrometers per pixel from ImageJ's Set Scale dialog for each ORIGINAL.
 If recovering calibration from a bar, divide its physical length by the measured
 pixel span in that exact image. A 20 µm bar does not establish a common µm/pixel
-value across images that have been resized. Keep original dimensions and crops.
+value across magnifications or images that have been resized. Record magnification
+as metadata and verify the bar pixel span in each original. Keep original dimensions and crops.
 Exclude scale bars/text from the analytical field of view using a verified
 same-resolution ROI/mask; do not interpret their dark lines as collagen.
 
@@ -53,7 +54,7 @@ as ignored or complete a reviewed annotation of the selected training regions.
 
 ## Evaluation and future AI
 
-Reserve whole images, and where possible whole independent specimen/acquisition
+Reserve whole independent specimen/acquisition
 groups, for held-out testing before making patches. All originals, resized copies,
 labeled copies, ROIs and patches of one image must remain in the same split.
 Fifteen images support a pilot but do not establish generalization.
@@ -88,3 +89,12 @@ No real-image accuracy result or trained-model claim has been established yet.
 
 Passing software tests and exclusion checks on the supplied images does not
 replace this paired validation. No numerical accuracy tolerance is claimed yet.
+
+## Implemented validation workflow
+
+See [independent scientific validation](scientific-validation.md) for the new
+reference annotation panel, per-image calibration and group metadata, immutable
+versions, CLI profiles/splits/reports and optional plot dependencies. The
+[technical baseline](scientific-validation-baseline.md) records the inspected data
+and precisely which real annotations are still missing. Accuracy improvement
+remains unestablished.

@@ -1,9 +1,9 @@
-from dataclasses import asdict, dataclass, field
+from dataclasses import dataclass, field
 import json
 import numpy as np
 import pandas as pd
 from .preprocessing import preprocess
-from .segmentation import ThresholdSegmenter
+from .segmentation import ThresholdSegmenter, segmentation_parameters
 from .detection import detect
 from .geometry import measure
 from .quality import classify, counted_candidates
@@ -81,7 +81,7 @@ def analyze_pixels(image, image_id="image", segmenter=None, sigma=0.0, min_area=
         # a rendered image, where text could obscure or resemble skeleton pixels.
         centerlines[int(region.label)] = np.argwhere(m['skeleton']).astype(np.int32) + np.asarray((y0,x0),np.int32)
     parameters = {
-        'segmentation': asdict(segmenter) if isinstance(segmenter, ThresholdSegmenter) else {'type': type(segmenter).__name__},
+        'segmentation': segmentation_parameters(segmenter),
         'sigma_px': float(sigma), 'min_area_px': int(min_area), 'endpoint_exclusion_px': float(exclusion_px),
         'exclusion_regions_xyxy': [list(r) for r in regions_to_exclude],
         'exclusion_policy': 'intersecting candidates retained and flagged; excluded from accepted statistics',

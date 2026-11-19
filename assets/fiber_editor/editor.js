@@ -26,24 +26,29 @@ function diagnostic(stage,details){
 }
 function controls(){
   const disabled=!ready || args?.review_enabled===false;
-  for(const id of ['toggle','outline','clear','accept','reject'])$(id).disabled=disabled || barrier();
-  for(const id of ['accept','reject'])$(id).disabled=disabled || barrier() || !visible(objects.get(state?.selected));
+  for(const id of ['toggle','outline','reference','clear','accept','reject'])$(id).disabled=disabled || barrier();
+  $('reference').disabled=disabled || barrier() || !args?.reference_enabled;
+  $('reference').title=args?.reference_enabled?'Draw an independent human reference boundary without changing the analysis.':'Configure the scientific reference form below the results first.';
+  for(const id of ['accept','reject'])$(id).disabled=disabled || barrier() || state?.mode!=='review' || !visible(objects.get(state?.selected));
   const target=visible(objects.get(state?.selected))?'fiber '+state.selected:'selected';
   $('accept').textContent=`Accept ${target} (A)`;$('reject').textContent=`Reject ${target} (R)`;
   const selected=objects.get(state?.selected);
   $('resolve').hidden=!(visible(selected) && selected.manual==='accepted' && !selected.accepted && selected.can_outline);
   $('resolve').disabled=disabled || barrier() || state?.mode!=='review';
-  for(const id of ['undo','redo'])$(id).disabled=disabled || barrier();
-  $('next').disabled=disabled || barrier();
+  for(const id of ['undo','redo'])$(id).disabled=disabled || barrier() || state?.mode==='reference';
+  $('next').disabled=disabled || barrier() || state?.mode!=='review';
   for(const id of ['clickMode','viewMode','shortcuts','showIds','zoom','diagnostics','guided'])$(id).disabled=!ready;
   $('guided').disabled=disabled || barrier();
   $('clickMode').disabled=disabled;
-  $('save').disabled=disabled || pending().length>0 || state?.mode!=='outline' || state.points.length<3;
+  $('save').disabled=disabled || pending().length>0 || !['outline','reference'].includes(state?.mode) || state.points.length<3;
+  $('save').textContent=state?.mode==='reference'?'Save reference boundary':'Save outline';
   canvas.dataset.pendingCount=String(pending().length);
   canvas.dataset.editorReady=String(ready);
   $('toggle').setAttribute('aria-pressed',String(state?.mode==='review'));
   $('outline').setAttribute('aria-pressed',String(state?.mode==='outline'));
-  $('mode-label').textContent=state?.mode==='outline'?'Outline mode · left-click adds boundary points':
+  $('reference').setAttribute('aria-pressed',String(state?.mode==='reference'));
+  $('mode-label').textContent=state?.mode==='reference'?'Independent reference mode · draw a human boundary; predictions stay unchanged':
+    state?.mode==='outline'?'Outline mode · left-click adds boundary points':
     state?.clickMode==='toggle'?'Review mode · left-click toggles approval / right-click rejects':'Review mode · left-click approves / right-click rejects';
   $('diagnostic-panel').hidden=!state?.diagnostics;
 }
@@ -120,8 +125,8 @@ function paintRect(rect){
   const x=Math.max(0,Math.floor(rect[0])),y=Math.max(0,Math.floor(rect[1]));
   const width=Math.min(assets.width,Math.ceil(rect[2]))-x,height=Math.min(assets.height,Math.ceil(rect[3]))-y;
   if(width<=0 || height<=0)return;
-  const data=assets.baseCtx.getImageData(x,y,width,height),pixels=data.data;
-  for(let row=0;row<height;row++)for(let col=0;col<width;col++){
+  const data=(state.mode==='reference'?originalCtx:assets.baseCtx).getImageData(x,y,width,height),pixels=data.data;
+  if(state.mode!=='reference')for(let row=0;row<height;row++)for(let col=0;col<width;col++){
     const id=assets.labels[(row+y)*assets.width+x+col];
     if(!id)continue;
     const obj=objects.get(id);if(!visible(obj))continue;
@@ -131,7 +136,7 @@ function paintRect(rect){
       pixels[p+channel]=Math.round((1-OVERLAY_OPACITY)*pixels[p+channel]+OVERLAY_OPACITY*color[channel]);
   }
   ctx.putImageData(data,x,y);
-  if(state.showIds){
+  if(state.showIds && state.mode!=='reference'){
     ctx.save();ctx.beginPath();ctx.rect(x,y,width,height);ctx.clip();
     const items=activeLayouts().map(item=>assets.sprites.get(item.fiber_id)).filter(Boolean)
       .filter(s=>intersects([x,y,x+width,y+height],[s.x,s.y,s.x+s.leader.width,s.y+s.leader.height]));
@@ -206,8 +211,8 @@ function points(){
       previewCtx.strokeRect(b[0]-pad,b[1]-pad,b[2]-b[0]+2*pad,b[3]-b[1]+2*pad);previewCtx.restore();
     }
   }
-  if(state.mode!=='outline' || !state.points.length)return;
-  previewCtx.lineWidth=2/scale;previewCtx.strokeStyle='#ffd43b';previewCtx.fillStyle='#ffd43b';previewCtx.beginPath();
+  if(!['outline','reference'].includes(state.mode) || !state.points.length)return;
+  previewCtx.lineWidth=2/scale;previewCtx.strokeStyle=state.mode==='reference'?'#8f54e9':'#ffd43b';previewCtx.fillStyle=previewCtx.strokeStyle;previewCtx.beginPath();
   state.points.forEach((p,i)=>i?previewCtx.lineTo(...p):previewCtx.moveTo(...p));previewCtx.stroke();
   for(const p of state.points){previewCtx.beginPath();previewCtx.arc(...p,3/scale,0,2*Math.PI);previewCtx.fill();}
 }
@@ -245,7 +250,7 @@ function enqueue(action,extra={}){
   return true;
 }
 function classify(id,action,extra={}){
-  if(!editable() || !visible(objects.get(id)))return;
+  if(!editable() || state.mode!=='review' || !visible(objects.get(id)))return;
   const before=objects.get(id).approved;
   state.selected=id;
   const next=state.guided && state.mode==='review'?nextReviewId(id,1,id):id;
@@ -264,7 +269,7 @@ function focusSelected(){
   syncScroll(viewport,originalViewport);
 }
 function selectNext(direction=1){
-  if(!ready || args.review_enabled===false || barrier())return;
+  if(!ready || args.review_enabled===false || barrier() || state.mode!=='review')return;
   if(state.guided){
     state.selected=nextReviewId(state.selected,direction);state.reviewInitialized=true;
     focusSelected();updateMetadata();syncSelection();canvas.focus({preventScroll:true});return;
@@ -276,12 +281,16 @@ function selectNext(direction=1){
   state.selected=ids[index<0?(direction>0?0:ids.length-1):(index+direction+ids.length)%ids.length];
   focusSelected();updateMetadata();syncSelection();canvas.focus({preventScroll:true});
 }
-function setMode(mode){if(!editable())return;state.mode=mode;state.resolving=false;
+function setMode(mode){if(!editable())return;const oldMode=state.mode;state.mode=mode;state.resolving=false;
+  if(mode==='reference'){state.points=[];state.referenceContext=args.reference_context;}
   if(mode==='review' && state.guided){state.selected=nextReviewId();state.reviewInitialized=true;focusSelected();}
-  updateMetadata();if(mode==='review')syncSelection();status(mode==='outline'?'Trace one separated boundary, then Save outline. Backspace removes a vertex.':'Left accept / right reject, or choose Toggle mode.');}
+  if(oldMode==='reference' || mode==='reference')paintRect([0,0,canvas.width,canvas.height]);
+  updateMetadata();if(mode==='review')syncSelection();status(mode==='reference'?'Draw an independent reference boundary. Save reference boundary does not alter predictions.':mode==='outline'?'Trace one separated boundary, then Save outline. Backspace removes a vertex.':'Left accept / right reject, or choose Toggle mode.');}
 $('toggle').onclick=()=>setMode('review');$('outline').onclick=()=>setMode('outline');
+$('reference').onclick=()=>{if(args.reference_enabled)setMode('reference');};
 $('clear').onclick=()=>{state.points=[];points();controls();};
-$('save').onclick=()=>enqueue('outline',{points:state.points.map(p=>p.slice())});
+$('save').onclick=()=>enqueue(state.mode==='reference'?'reference_outline':'outline',
+  {points:state.points.map(p=>p.slice()),reference_context:args.reference_context});
 $('accept').onclick=()=>classify(state.selected,'accept');$('reject').onclick=()=>classify(state.selected,'reject');
 $('resolve').onclick=()=>{
   if(!editable() || !objects.get(state.selected)?.can_outline)return;
@@ -312,7 +321,7 @@ canvas.onpointerup=e=>{
   const r=canvas.getBoundingClientRect(),x=(e.clientX-r.left)*canvas.width/r.width,y=(e.clientY-r.top)*canvas.height/r.height;
   if(x<0 || y<0 || x>=canvas.width || y>=canvas.height)return;
   canvas.focus({preventScroll:true});
-  if(state.mode==='outline'){
+  if(['outline','reference'].includes(state.mode)){
     if(button!==0)return;
     if(state.points.length>=512){status('Maximum 512 vertices; save or clear this outline.');return;}
     state.points.push([x,y]);points();controls();return;
@@ -332,10 +341,13 @@ canvas.onkeydown=e=>{
   if(!state?.shortcuts || !ready)return;
   const key=e.key.toLowerCase();
   if((e.ctrlKey||e.metaKey) && ['z','y'].includes(key)){
+    if(state.mode==='reference'){
+      e.preventDefault();if(key==='z' && editable()){state.points.pop();points();controls();}return;
+    }
     e.preventDefault();enqueue(key==='y'||e.shiftKey?'redo':'undo');return;
   }
   if(e.ctrlKey||e.metaKey||e.altKey)return;
-  if(key==='backspace' && state.mode==='outline' && editable()){e.preventDefault();state.points.pop();points();controls();}
+  if(key==='backspace' && ['outline','reference'].includes(state.mode) && editable()){e.preventDefault();state.points.pop();points();controls();}
   if(key==='a'){e.preventDefault();classify(state.selected,'accept');}
   if(key==='r'){e.preventDefault();classify(state.selected,'reject');}
   if(['n','arrowright','p','arrowleft'].includes(key)){e.preventDefault();selectNext(['p','arrowleft'].includes(key)?-1:1);}
@@ -388,6 +400,7 @@ window.addEventListener('message',async event=>{
         if(Number.isInteger(data.ack_fiber_id))state.selected=data.ack_fiber_id;
       }
     }
+    if(state.inflight.action==='reference_outline' && data.event_ok){state.points=[];state.mode='review';state.repaintAfterReference=true;}
     if(!data.event_ok){state.queue=[];
       if(state.guided && Number.isInteger(state.inflight.fiber_id))state.selected=state.inflight.fiber_id;
       notice='Save failed; provisional changes were restored to the confirmed state. '+notice;}
@@ -401,6 +414,13 @@ window.addEventListener('message',async event=>{
     state.queue=[];state.inflight=null;state.policy=data.policy_key;
   }
   args=data;
+  if(state.mode==='reference' && !data.reference_enabled){
+    state.mode='review';state.points=[];state.repaintAfterReference=true;
+  }
+  if(state.mode==='reference' && state.referenceContext!==data.reference_context){
+    state.points=[];state.referenceContext=data.reference_context;
+    notice='Reference configuration changed; the unsaved outline was cleared.';
+  }
   if(committedKey!==data.asset_key){ready=false;points();controls();}
   const cacheKey=client+':'+data.asset_key;
   if(!shared.assets.has(cacheKey) && !data.base_image){
@@ -450,6 +470,7 @@ window.addEventListener('message',async event=>{
       for(const rect of oldRects)paintRect(rect);
       paintObjects(spriteChanges);
     }
+    if(state.repaintAfterReference){state.repaintAfterReference=false;paintRect([0,0,canvas.width,canvas.height]);points();}
     status(pending().length?'Saving corrections… Keep this tab open until all corrections are saved.':notice||'All corrections saved. Left accept / right reject. A/R/N and Undo/Redo work when the image has keyboard focus.');
     if(state.syncCursorAfterRender && !pending().length){state.syncCursorAfterRender=false;syncSelection();}
     pump();

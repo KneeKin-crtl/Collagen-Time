@@ -2,6 +2,7 @@ from dataclasses import dataclass
 
 import numpy as np
 import pandas as pd
+from .scientific_metrics import agreement_statistics
 
 KEYS = ["image_id", "fiber_id"]
 METRICS = ["length_um", "mean_diameter_um"]
@@ -46,6 +47,9 @@ def compare_ground_truth(measured, manual):
         joined[metric + "_included"] = included
         joined[metric + "_error"] = (joined[metric + "_auto"] - joined[metric + "_manual"]).where(included)
         joined[metric + "_relative_error_pct"] = 100 * joined[metric + "_error"] / joined[metric + "_manual"]
+        joined[metric + '_absolute_error'] = joined[metric + '_error'].abs()
+        joined[metric + '_absolute_relative_error_pct'] = joined[metric + '_relative_error_pct'].abs()
+        joined[metric + '_pair_mean'] = ((joined[metric + '_auto']+joined[metric + '_manual'])/2).where(included)
     return joined
 
 
@@ -79,6 +83,8 @@ def comparison_report(measured, manual):
     metrics = []
     for metric in METRICS:
         errors = rows.loc[rows[metric + "_included"], metric + "_error"]
+        paired=rows[rows[metric+'_included']]
+        agreement=agreement_statistics(paired[metric+'_auto'],paired[metric+'_manual'])
         metrics.append({
             "measurement": metric,
             "paired_count": int(errors.size),
@@ -86,5 +92,10 @@ def comparison_report(measured, manual):
             'excluded_by_measurement_policy_count': int((accepted & ~rows.measurement_eligible_matched).sum()),
             "bias_um": float(errors.mean()),
             "mean_absolute_error_um": float(errors.abs().mean()),
+            'median_absolute_error_um': agreement['median_absolute_error_um'],
+            'mean_absolute_relative_error_pct': agreement['mean_absolute_relative_error_pct'],
+            'difference_sd_um': agreement['difference_sd_um'],
+            'bland_altman_lower_um': agreement['bland_altman_lower_um'],
+            'bland_altman_upper_um': agreement['bland_altman_upper_um'],
         })
     return ComparisonReport(rows, counts, pd.DataFrame(metrics))

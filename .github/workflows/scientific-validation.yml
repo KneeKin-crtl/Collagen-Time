@@ -1,0 +1,44 @@
+name: Scientific validation infrastructure
+
+on:
+  workflow_dispatch:
+  push:
+    branches: ['scientific-validation-workflow']
+  pull_request:
+    paths:
+      - 'collagen/**'
+      - 'tests/test_scientific*'
+      - 'requirements-validation.lock.txt'
+      - 'requirements*.lock.txt'
+      - 'pyproject.toml'
+      - '.github/workflows/scientific-validation.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  reporting:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            python: '3.12'
+            requirements: requirements.lock.txt
+          - os: windows-latest
+            python: '3.15.2'
+            requirements: requirements-python315.lock.txt
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-python@v6
+        with:
+          python-version: ${{ matrix.python }}
+          architecture: x64
+      - name: Install pinned analysis and optional report dependencies
+        run: python -m pip install --only-binary=:all: -r ${{ matrix.requirements }} -r requirements-validation.lock.txt
+      - name: Install application
+        run: python -m pip install -e ".[dev,validation]"
+      - run: python -m pip check
+      - name: Validate matching, references, group safeguards and plots on synthetic data
+        run: python -m pytest -q tests/test_scientific_validation.py tests/test_scientific_reporting.py tests/test_learning.py

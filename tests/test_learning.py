@@ -8,6 +8,7 @@ from collagen.feedback import FeedbackStore
 from collagen.learning import FEATURE_NAMES, classification_metrics, predict, retrain
 from collagen.pipeline import analyze
 from collagen.review import ReviewSession
+from collagen.references import ReferenceStore, new_reference
 
 
 @pytest.fixture
@@ -22,6 +23,9 @@ def reviewed_dataset(tmp_path):
             cv2.circle(image,(240,y+3),4,200,-1)
         baseline=analyze(image,.25,f'image-{image_index}.tiff',min_area=1000)
         r=ReviewSession(baseline,store,f'image-{image_index}.tiff')
+        reference=new_reference(image,r.image_name,.25)
+        reference.update(specimen_id=f'synthetic-specimen-{image_index}',acquisition_group=f'synthetic-acquisition-{image_index}')
+        ReferenceStore(store.directory).save(reference,image)
         role='training' if image_index<2 else 'evaluation'
         for obj in r.objects:
             label='accepted' if obj['measurement']['centroid_x']<150 else 'rejected'
@@ -130,3 +134,36 @@ def test_model_validation_and_metrics_do_not_accept_invalid_payloads():
     m=classification_metrics([True,True,False,False],[True,False,True,False])
     assert m['balanced_accuracy'] == m['accepted_precision'] == .5
     assert m['false_accepted'] == m['false_rejected'] == 1
+
+
+def test_retraining_rejects_shared_specimen_even_with_disjoint_image_names(reviewed_dataset):
+    store,sessions=reviewed_dataset
+    references=ReferenceStore(store.directory)
+    doc=references.load(sessions[2].image_key)
+    doc['specimen_id']=references.load(sessions[0].image_key)['specimen_id']
+    references.save(doc,sessions[2].baseline.original)
+    with pytest.raises(ValueError,match='leakage'):retrain(store)
+    assert store.active_model() is None
+
+
+def test_retraining_needs_verified_groups_and_never_uses_final_test_for_promotion(reviewed_dataset):
+    store,sessions=reviewed_dataset;references=ReferenceStore(store.directory)
+    doc=references.load(sessions[2].image_key);doc['specimen_id']=None
+    changed=references.save(doc,sessions[2].baseline.original)
+    with pytest.raises(ValueError,match='verified specimen'):retrain(store)
+    changed['specimen_id']='new-synthetic-specimen';changed['split']='test'
+    references.save(changed,sessions[2].baseline.original)
+    assert sessions[2].image_key not in {s['image_key'] for s in store.training_snapshot()[1]}
+    with pytest.raises(ValueError,match='two training images'):retrain(store)
+    assert store.models()==[]
+
+
+def test_unreviewed_metadata_bridge_cannot_hide_transitive_training_leakage(reviewed_dataset):
+    store,sessions=reviewed_dataset;references=ReferenceStore(store.directory)
+    image=np.full((30,40),33,np.uint8)
+    bridge=new_reference(image,'synthetic-metadata-bridge.png')
+    bridge.update(specimen_id=references.load(sessions[0].image_key)['specimen_id'],
+                  acquisition_group=references.load(sessions[2].image_key)['acquisition_group'])
+    references.save(bridge,image)
+    with pytest.raises(ValueError,match='leakage'):retrain(store)
+    assert store.models()==[]

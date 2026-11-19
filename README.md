@@ -237,3 +237,17 @@ See [dataset preparation and validation](docs/dataset-and-validation.md) for
 calibration, ROI exports, ambiguous objects and future AI requirements. User
 images, measurements and model weights are not included in the repository or
 Windows build.
+
+## Independent scientific validation
+
+The new [validation guide](docs/scientific-validation.md) covers four-way human
+reference categories, independent/missed object boundaries, versioned annotations,
+per-original calibration, specimen/acquisition-disjoint splits and reproducible
+CSV/HTML/plot reports. [Baseline findings](docs/scientific-validation-baseline.md)
+record pixel-identical default masks on 15 originals; real-image accuracy remains
+unestablished because independent references/group metadata are incomplete.
+
+Background subtraction and hysteresis are opt-in conventional experiments. Existing
+geometry, calibration, operational review and export rules remain. No new real-data
+model was trained; existing object-classifier promotion now requires verified group
+separation. Optional plots: `python -m pip install -r requirements-validation.lock.txt -e ".[validation]"`.

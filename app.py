@@ -60,14 +60,18 @@ with st.sidebar:
     with st.form('analysis_controls'):
         with st.expander('Image Calibration', expanded=True):
             calibration = st.number_input('Calibration (µm/pixel)', min_value=0.000001, value=None,
-                                          format='%.6f', key='calibration-' + str(image_key))
+                                          format='%.8f', key='calibration-' + str(image_key))
             st.caption('Required for this original image. Read the verified value from ImageJ Set Scale; screen DPI and resized references are not calibration.')
         with st.expander('Thresholding', expanded=True):
-            method = st.selectbox('Threshold', ['otsu', 'manual', 'local'])
+            method = st.selectbox('Threshold', ['otsu', 'manual', 'local', 'hysteresis'])
             bright = st.checkbox('Bright fibers on dark background', value=False)
             threshold = st.slider('Manual threshold (normalized intensity)', 0.0, 1.0, 0.5)
             block = st.number_input('Local threshold block size (odd)', 3, 501, 35, 2)
             sigma = st.number_input('Gaussian sigma (pixels)', 0.0, 10.0, 0.0)
+            background_sigma = st.number_input('Background illumination sigma (pixels; 0 disables)', 0.0, 200.0, 0.0)
+            hysteresis_low = st.number_input('Hysteresis low threshold', 0.0, 1.0, 0.2, 0.05)
+            hysteresis_high = st.number_input('Hysteresis high threshold', 0.0, 1.0, 0.5, 0.05)
+            st.caption('Experimental recovery options: background subtraction can amplify texture; hysteresis retains weak pixels connected to strong seeds. Defaults preserve the original detector. Tune on development images and validate independently before claiming improvement.')
         with st.expander('Morphological Processing', expanded=False):
             opening = st.number_input('Opening radius (pixels)', 0, 10, 0)
             closing = st.number_input('Closing radius (pixels)', 0, 10, 0)
@@ -120,6 +124,10 @@ if submitted:
                         block_size=int(block), opening_radius=int(opening), closing_radius=int(closing)),
                         sigma=sigma, min_area=int(min_area), exclusion_px=exclusion,
                         exclusion_regions=regions)
+        if background_sigma:
+            settings['segmentation']['background_sigma_px']=background_sigma
+        if method=='hysteresis':
+            settings['segmentation'].update(low_threshold=hysteresis_low,high_threshold=hysteresis_high)
         filters = SelectionFilters(research_range_enabled=research_range, min_diameter_nm=min_diameter_nm,
                     max_diameter_nm=max_diameter_nm, min_length_um=min_length_um, min_area_um2=min_area_um2,
                     min_width_px=min_width_px, exclude_border=exclude_border, crossing_policy=crossing_policy)
