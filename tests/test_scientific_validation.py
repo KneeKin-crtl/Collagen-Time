@@ -141,6 +141,19 @@ def test_reference_versions_are_immutable_restorable_and_included_in_existing_ba
     with pytest.raises(ValueError,match='match'):validate_reference(v2,bad)
 
 
+def test_new_false_positives_compare_only_the_same_reviewed_region():
+    before,ref=fixture();after=deepcopy(before)
+    # The same false-positive pixels in the reviewed rectangle have differing
+    # unreviewed extensions. Those unknown extensions cannot create a "new FP".
+    ref['reviewed_regions_xyxy']=[[0,0,30,100]]
+    before.labels[70:80,30:220]=5
+    old=evaluate_instances(before,ref);new=evaluate_instances(after,ref)
+    assert compare_methods(old,new,before.labels,after.labels)['new_false_positives']==0
+    other=deepcopy(ref);other['reviewed_regions_xyxy']=[[0,0,29,100]]
+    with pytest.raises(ValueError,match='same independently reviewed'):
+        compare_methods(old,evaluate_instances(after,other),before.labels,after.labels)
+
+
 @pytest.mark.parametrize('field,value',[('category','accepted'),('reviewer',''),('length_um',-1),('length_um',float('inf'))])
 def test_invalid_reference_objects_are_rejected(field,value):
     a,ref=fixture();ref['objects'][0][field]=value

@@ -88,6 +88,7 @@ class ScientificEvaluation:
     prediction_rows: pd.DataFrame
     confusion: pd.DataFrame
     measurement_rows: pd.DataFrame
+    scoring_mask: np.ndarray
 
 
 def evaluate_instances(analysis, reference, iou_threshold=.5):
@@ -131,7 +132,6 @@ def evaluate_instances(analysis, reference, iou_threshold=.5):
         copied_in_scope+=int(np.any(mask & scope[y0:y1,x0:x1]))
     complete=reference['coverage']=='exhaustive_regions' and not copied_in_scope and bool(scope.any())
     pred_ids=np.unique(labels[scope]);pred_ids=pred_ids[pred_ids!=0]
-    id_index={int(fid):j for j,fid in enumerate(pred_ids)}
     pred_areas=np.bincount(labels[scope].ravel(),minlength=int(labels.max(initial=0))+1)
     truth_fibers=np.zeros(labels.shape,bool);ious=[];scorable=[]
     for obj,mask,bbox in refs:
@@ -214,11 +214,14 @@ def evaluate_instances(analysis, reference, iou_threshold=.5):
         missing_ground_truth_reason=None if complete else 'Complete independent region annotations are absent; unmatched predictions are not presumed false positives.')
     return ScientificEvaluation(summary,pd.DataFrame(ref_rows,columns=['reference_id','category','fiber_id','matched','iou',
         'best_overlap_iou','measurement_included','failure_mode','overlapping_prediction_count']),
-        pd.DataFrame(pred_rows,columns=['fiber_id','reference_id','reference_category','false_positive','status','overlapping_reference_count']),confusion,measured)
+        pd.DataFrame(pred_rows,columns=['fiber_id','reference_id','reference_category','false_positive','status','overlapping_reference_count']),confusion,measured,scope)
 
 
 def compare_methods(before, after, before_labels, after_labels, iou_threshold=.5):
     """Recovery is independent-reference identity; new FPs use spatial matching."""
+    if (not np.array_equal(before.scoring_mask,after.scoring_mask)
+            or before_labels.shape!=before.scoring_mask.shape or after_labels.shape!=after.scoring_mask.shape):
+        raise ValueError('Compare methods within the same independently reviewed pixel scope.')
     def matched_fibers(report):
         r=report.reference_rows
         return set(r.loc[r.category.isin(FIBER_CATEGORIES)&r.matched,'reference_id'])
@@ -237,9 +240,9 @@ def compare_methods(before, after, before_labels, after_labels, iou_threshold=.5
         old_ids=before.prediction_rows.loc[before.prediction_rows.false_positive.eq(True),'fiber_id'].tolist()
         new_ids=after.prediction_rows.loc[after.prediction_rows.false_positive.eq(True),'fiber_id'].tolist()
         overlap=np.zeros((len(old_ids),len(new_ids)),float)
-        new_areas={fid:int((after_labels==fid).sum()) for fid in new_ids}
+        new_areas={fid:int(((after_labels==fid)&after.scoring_mask).sum()) for fid in new_ids}
         for i,fid in enumerate(old_ids):
-            mask=before_labels==fid;values,counts=np.unique(after_labels[mask],return_counts=True)
+            mask=(before_labels==fid)&before.scoring_mask;values,counts=np.unique(after_labels[mask],return_counts=True)
             intersections=dict(zip(values,counts));area=int(mask.sum())
             for j,new_id in enumerate(new_ids):
                 intersection=int(intersections.get(new_id,0));overlap[i,j]=intersection/(area+new_areas[new_id]-intersection)
