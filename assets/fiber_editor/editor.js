@@ -272,7 +272,8 @@ function center_on_active_fiber(force=false){
   // Coalesce rapid target changes and wait until updated layout is measurable.
   // Confirmation rerenders of the same target preserve manually chosen scroll.
   centerFrame=requestAnimationFrame(()=>{
-    centerFrame=null;if(activeFocusKey()!==key)return;
+    centerFrame=null;
+    if(activeFocusKey()!==key || Number(args.review_revision??0)!==(state.reviewRevision??0))return;
     const point=assets.focusPoints.get(state.selected);if(!point)return;
     const scale=canvas.getBoundingClientRect().width/assets.width;
     viewport.scrollLeft=canvas.offsetLeft+point.x*scale-viewport.clientWidth/2;
@@ -443,11 +444,15 @@ async function loadAssets(data){
 }
 window.addEventListener('message',async event=>{
   if(event.source!==window.parent || event.data?.type!=='streamlit:render')return;
-  origin=event.origin;const data=event.data.args,id=++generation;
+  origin=event.origin;const data=event.data.args;
   if(event.data.theme){const t=event.data.theme;for(const [key,value] of Object.entries({text:t.textColor,surface:t.secondaryBackgroundColor,background:t.backgroundColor}))document.documentElement.style.setProperty('--'+key,value);}
   const client=data.client_key||'baseline';
   if(!shared.states.has(client))shared.states.set(client,{queue:[],inflight:null,selected:null,layouts:new Map(),mode:'review',points:[],clickMode:'accept_reject',viewMode:'all',shortcuts:true,showIds:true,zoom:'100',scroll:[0,0],policy:data.policy_key});
   state=shared.states.get(client);
+  const revision=Number(data.review_revision??0);
+  if(revision<(state.reviewRevision??0))return;
+  state.reviewRevision=revision;
+  const id=++generation,current=()=>id===generation && revision===state.reviewRevision;
   if(state.guided===undefined)state.guided=true;
   let notice=data.message||'';
   if(state.inflight && data.ack_token===state.inflight.token){
@@ -463,9 +468,6 @@ window.addEventListener('message',async event=>{
     if(!data.event_ok){state.queue=[];
       if(state.guided && Number.isInteger(state.inflight.fiber_id))state.selected=state.inflight.fiber_id;
       notice='Save failed; provisional changes were restored to the confirmed state. '+notice;}
-    if(data.event_ok && state.guided && ['undo','redo'].includes(state.inflight.action)){
-      state.reviewInitialized=false;state.syncCursorAfterRender=true;
-    }
     state.inflight=null;
   }
   if(state.policy!==data.policy_key){
@@ -493,18 +495,18 @@ window.addEventListener('message',async event=>{
   state.assetRequest=null;
   try{
     const next=await loadAssets(data);
-    if(id!==generation)return;
+    if(!current())return;
     const spriteChanges=new Set(),oldRects=[];
     await Promise.all((data.id_sprites||[]).map(async sprite=>{
       const old=next.sprites.get(sprite.fiber_id);
       if(old?.key===sprite.sprite_key)return;
       const [leader,text]=await Promise.all([sprite.leader_image,sprite.text_image].map(loadImage));
-      if(id!==generation)return;
+      if(!current())return;
       if(old)oldRects.push([old.x,old.y,old.x+old.leader.width,old.y+old.leader.height]);
       spriteChanges.add(sprite.fiber_id);
       next.sprites.set(sprite.fiber_id,{x:sprite.x,y:sprite.y,leader,text,key:sprite.sprite_key});
     }));
-    if(id!==generation)return;
+    if(!current())return;
     // Commit geometry only after every awaited layer is ready. Another render
     // can supersede this one while sprites decode, even at identical dimensions.
     const changed=assets!==next,previous=objects;
@@ -531,9 +533,8 @@ window.addEventListener('message',async event=>{
     }
     if(state.repaintAfterReference){state.repaintAfterReference=false;paintRect([0,0,canvas.width,canvas.height]);points();}
     status(pending().length?'Saving corrections… Keep this tab open until all corrections are saved.':notice||'All corrections saved. Left accept / right reject. A/R/N and Undo/Redo work when the image has keyboard focus.');
-    if(state.syncCursorAfterRender && !pending().length){state.syncCursorAfterRender=false;syncSelection();}
     pump();
-  }catch(error){if(id!==generation)return;ready=false;controls();status(error.message+' Review is disabled; refresh before editing.');}
+  }catch(error){if(!current())return;ready=false;controls();status(error.message+' Review is disabled; refresh before editing.');}
 });
 if(!shared.unloadHandler){
   window.parent.addEventListener('beforeunload',event=>{

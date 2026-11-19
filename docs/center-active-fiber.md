@@ -85,3 +85,11 @@ manual-pan preservation, and simulates an abandoned load to verify recovery. It
 retains the original centering tolerance and still checks actual on-screen offsets,
 mask identity, zoom, saved decisions and numerical exports. A missing diagnostic
 marker is never treated as evidence that measurements changed.
+
+Confirmed review revisions now travel with viewer renders. A delayed older render
+is ignored before it can modify decisions, cursor state or a pending render's
+generation; asynchronous layer completions also verify their revision. Confirmed
+canvas Undo/Redo responses carry the authoritative next-unreviewed cursor from
+the server, matching the existing object-ID history controls. A regression replays
+an older completed-review render after Undo and checks that the restored target,
+colors and saved history remain unchanged.

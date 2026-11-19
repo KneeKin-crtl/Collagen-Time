@@ -49,6 +49,9 @@ def editor_diagnostics(page):
                     center:c?.dataset.centerPoint,
                     scroll:c?Array.from([c.closest('.viewport').scrollLeft,c.closest('.viewport').scrollTop]):null,
                     clickTrace:document.getElementById('click-log')?.textContent?.slice(-2200),
+                    cursor:typeof state==='object' && state?{selected:state.selected,revision:state.reviewRevision,
+                        selectionToken:state.selectionToken,initialized:state.reviewInitialized}:null,
+                    selectionRequest:typeof args==='object' && args?args.selection_request:null,
                     selected:document.getElementById('selected')?.textContent,
                     status:document.getElementById('status')?.textContent,
                     progress:document.getElementById('review-progress')?.textContent,
@@ -266,7 +269,10 @@ def interactions(browser, url, root, output, network_latency_ms=0):
 
     open_analysis(guided=True)
     def active(expected):
-        expect(editor().locator('#image')).to_have_attribute('data-active-fiber-id','' if expected is None else str(expected))
+        try:
+            expect(editor().locator('#image')).to_have_attribute('data-active-fiber-id','' if expected is None else str(expected))
+        except AssertionError as error:
+            raise AssertionError(('Active target mismatch',expected,editor_diagnostics(page))) from error
         expect(editor().locator('#outline-preview')).to_have_attribute('data-active-fiber-id','' if expected is None else str(expected))
         alignment=editor().locator('#outline-preview').evaluate('''p=>{
             const a=p.getBoundingClientRect(),b=document.getElementById('image').getBoundingClientRect();

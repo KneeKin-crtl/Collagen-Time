@@ -2,8 +2,10 @@
 from contextlib import closing,suppress
 import csv
 import json
+import os
 import sqlite3
 import time
+import traceback
 
 from PIL import Image,ImageDraw
 from playwright.sync_api import expect
@@ -175,7 +177,25 @@ def interactions(browser,url,root,output,network_latency_ms=0):
         for field in ('fiber_id','length_um','mean_diameter_um','diameter_sd_um','calibration_um_per_px'):
             assert new[field]==old[field],(field,old,new)
     assert editor().locator('#original-image').evaluate('c=>c.toDataURL()')==source
+    completed_render=editor().locator('#image').evaluate('()=>args')
+    page.evaluate('''()=>{
+        window.__historyCursorActions=[];
+        window.addEventListener('message',e=>{
+            if(e.data?.type==='streamlit:setComponentValue' && ['undo','select'].includes(e.data.value?.action))
+                window.__historyCursorActions.push(e.data.value.action);
+        });
+    }''')
     editor().locator('#undo').click();saved();expected=active();centered(expected)
+    assert page.evaluate('window.__historyCursorActions')==['undo'], 'History acknowledgement echoed a stale selection'
+    confirmed=editor().locator('#image').evaluate('c=>c.toDataURL()')
+    confirmed_history=states()
+    # A delayed completed-queue render must not erase Undo's active target or
+    # put older green/red decisions back on screen, including across iframes.
+    editor().locator('#image').evaluate('''(c,data)=>window.dispatchEvent(new MessageEvent('message',{
+        data:{type:'streamlit:render',args:data},source:window.parent,origin:window.parent.location.origin}))''',completed_render)
+    centered(expected)
+    assert editor().locator('#image').evaluate('c=>c.toDataURL()')==confirmed
+    assert states()==confirmed_history
     page.screenshot(path=str(output/'centered-active-fiber.png'),full_page=True)
     page.close();page=checks.new_analysis_page(browser,network_latency_ms)
     page.on('pageerror',lambda error:errors.append(str(error)))
@@ -189,9 +209,16 @@ def interactions(browser,url,root,output,network_latency_ms=0):
         measurements_unchanged=True,original_unchanged=True,reopened_review=True,
         iframe_refresh_restores_center_trace=True,iframe_refresh_preserves_manual_pan=True,
         orphaned_image_load_recovers=True,
+        stale_render_cannot_overwrite_undo_or_colors=True,
         network_latency_ms=network_latency_ms,positions=measurements,browser_errors=errors),indent=2))
     print('Centering browser passed: decisions, mouse/keyboard, dropdown, filters, manual pan, failures, exports and reopening',flush=True)
 
 
 if __name__=='__main__':
-    checks.synthetic_png=synthetic;checks.interactions=interactions;checks.main()
+    try:
+        checks.synthetic_png=synthetic;checks.interactions=interactions;checks.main()
+    except Exception:
+        if os.environ.get('GITHUB_ACTIONS')=='true':
+            detail=traceback.format_exc()[-5000:].replace('%','%25').replace('\r','%0D').replace('\n','%0A')
+            print('::error title=Centering browser failure::'+detail,flush=True)
+        raise
