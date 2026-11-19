@@ -45,6 +45,8 @@ def editor_diagnostics(page):
                 return {canvas:c?[c.width,c.height]:null,original:o?[o.width,o.height]:null,
                     pending:c?.dataset.pendingCount,context:c?.dataset.reviewContext,
                     ready:c?.dataset.editorReady,source:c?.dataset.sourceImage,
+                    active:c?.dataset.activeFiberId,guided:c?.dataset.guidedReview,
+                    selected:document.getElementById('selected')?.textContent,
                     status:document.getElementById('status')?.textContent,
                     progress:document.getElementById('review-progress')?.textContent,
                     disabled:document.getElementById('toggle')?.disabled};
@@ -115,7 +117,13 @@ def interactions(browser, url, root, output, network_latency_ms=0):
         loaded=page.locator('.st-key-loaded-image-'+expected_source)
         loaded.get_by_text(f'Loaded image: {path.name} · 1280 × 800 pixels',exact=True).wait_for(timeout=30000)
         wait_idle()
-    def open_analysis():
+    def free_review():
+        # Free-form inspection remains supported alongside the new default
+        # guided queue; the earlier interaction regressions exercise that mode.
+        if editor().locator('#guided').is_checked():
+            editor().locator('#guided').uncheck()
+            wait_saved()
+    def open_analysis(guided=False):
         page.goto(url)
         page.get_by_role('heading',name='Collagen Fiber Analyzer',exact=True).wait_for()
         page.get_by_text('Review ImageJ Excel workbook',exact=True).wait_for()
@@ -132,6 +140,7 @@ def interactions(browser, url, root, output, network_latency_ms=0):
         editor().locator('#original-image').wait_for(state='visible',timeout=30000)
         editor().locator('#toggle').wait_for(state='visible',timeout=30000)
         wait_saved()
+        if not guided:free_review()
         editor().locator('#clickMode').select_option('toggle')
     def wait_saved():
         deadline=time.monotonic()+30
@@ -220,8 +229,145 @@ def interactions(browser, url, root, output, network_latency_ms=0):
     def states():
         with closing(sqlite3.connect(root/'data'/'feedback.sqlite3')) as con:
             return con.execute('SELECT fiber_id,manual_classification,active FROM objects ORDER BY fiber_id').fetchall()
+    def export_rows(name):
+        with page.expect_download() as downloaded:
+            page.get_by_role('button',name='Download per-fiber CSV',exact=True).click()
+        downloaded.value.save_as(output/name)
+        with (output/name).open(encoding='utf-8',newline='') as file:
+            return list(csv.DictReader(file))
+    def displayed_pixel(x,y):
+        # Inspect Chromium's composited output, including the transient preview
+        # canvas, rather than trusting internal state or a hidden canvas buffer.
+        editor().locator('#viewport').scroll_into_view_if_needed()
+        c=editor().locator('#image')
+        c.evaluate('''(c,p)=>{
+            const v=c.parentElement,s=c.getBoundingClientRect().width/c.width;
+            v.scrollLeft=Math.max(0,p[0]*s-v.clientWidth/2);
+            v.scrollTop=Math.max(0,p[1]*s-v.clientHeight/2);
+        }''',[x,y])
+        box=c.bounding_box()
+        sx,sy=box['x']+x*box['width']/1280,box['y']+y*box['height']/800
+        screenshot=page.screenshot(clip=dict(x=int(sx)-2,y=int(sy)-2,width=5,height=5))
+        return Image.open(BytesIO(screenshot)).convert('RGB').getpixel((2,2))
 
-    open_analysis()
+    open_analysis(guided=True)
+    def active(expected):
+        expect(editor().locator('#image')).to_have_attribute('data-active-fiber-id','' if expected is None else str(expected))
+        expect(editor().locator('#outline-preview')).to_have_attribute('data-active-fiber-id','' if expected is None else str(expected))
+        alignment=editor().locator('#outline-preview').evaluate('''p=>{
+            const a=p.getBoundingClientRect(),b=document.getElementById('image').getBoundingClientRect();
+            return Math.max(...['x','y','width','height'].map(k=>Math.abs(a[k]-b[k])));
+        }''')
+        assert alignment<1, ('Active mask is misaligned with the source canvas',alignment)
+        if expected is not None:
+            expect(editor().locator('#accept')).to_have_text(f'Accept fiber {expected} (A)')
+            expect(editor().locator('#reject')).to_have_text(f'Reject fiber {expected} (R)')
+    def preview_pixel(x,y):
+        return editor().locator('#outline-preview').evaluate(
+            '(c,p)=>Array.from(c.getContext("2d").getImageData(p[0],p[1],1,1).data)',[x,y])
+    active(1)
+    assert preview_pixel(50,35)[2]>120 and preview_pixel(50,35)[3]>230
+    assert preview_pixel(50,75)[3]==0 and preview_pixel(500,500)[3]==0
+    pixel=displayed_pixel(50,35)
+    assert pixel[2]>pixel[0]+60 and pixel[2]>pixel[1]+60, ('Active highlight is not visibly blue',pixel)
+    assert editor().locator('#outline-preview').evaluate('e=>getComputedStyle(e).pointerEvents')=='none'
+    source_before=original_pixels()
+    analysis_before=editor().locator('#image').evaluate('c=>c.toDataURL()')
+    before_states=states()
+    guide_before=export_rows('guided-before.csv')
+    page.get_by_role('button',name='Prepare QC archive',exact=True).click()
+    wait_saved();active(1)
+    with page.expect_download() as downloaded:
+        page.get_by_role('button',name='Download all QC outputs',exact=True).click()
+    downloaded.value.save_as(output/'guided-active-qc.zip')
+    with zipfile.ZipFile(output/'guided-active-qc.zip') as archive:
+        for name in ('review_overlay.tiff','count_overlay.tiff'):
+            pixel=Image.open(BytesIO(archive.read(name))).getpixel((50,35))
+            assert pixel[1]>pixel[0] and pixel[1]>pixel[2], (name,'Blue review cursor leaked into export',pixel)
+    editor().locator('#zoom').fill('400')
+    active(1)
+    assert preview_pixel(50,35)[3]>230
+    for viewport_id in ('#viewport','#original-viewport'):
+        editor().locator(viewport_id).evaluate('v=>{v.scrollLeft=120;v.scrollTop=30;}')
+    page.set_viewport_size(dict(width=1280,height=900))
+    active(1)
+    assert original_pixels()==source_before
+    assert editor().locator('#image').evaluate('c=>c.toDataURL()')==analysis_before
+    assert states()==before_states, 'Highlighting, resize or zoom saved a correction.'
+    # Repaint and a Streamlit rerender must leave the same exact target active.
+    editor().locator('#showIds').uncheck();editor().locator('#showIds').check()
+    editor().locator('#next').click();wait_saved();active(2)
+    assert preview_pixel(50,35)[3]==0 and preview_pixel(50,75)[3]>230
+    assert states()==before_states
+    wait_idle()
+    page.get_by_text('Review by object ID and save confirmations',exact=True).click()
+    target=page.get_by_role('combobox',name='Object ID',exact=True)
+    target.scroll_into_view_if_needed()
+    # React Aria closes popovers on scrolling. Wait for the expander's finite
+    # animations and the input's scroll position before opening its menu.
+    target.evaluate('''async e=>{
+        const animations=e.closest('details').getAnimations({subtree:true})
+            .filter(a=>a.effect.getComputedTiming().iterations!==Infinity);
+        await Promise.all(animations.map(a=>a.finished.catch(()=>{})));
+        await new Promise(resolve=>{
+            let previous='',stable=0;
+            const tick=()=>{
+                const r=e.getBoundingClientRect(),position=[r.x,r.y,r.width,r.height].join(',');
+                stable=position===previous?stable+1:0;previous=position;
+                if(stable>=4)resolve();else requestAnimationFrame(tick);
+            };requestAnimationFrame(tick);
+        });
+    }''')
+    target.locator('..').get_by_role('button',name='Open',exact=True).click()
+    expect(target).to_have_attribute('aria-expanded','true')
+    page.get_by_role('option',name='1',exact=True).click()
+    wait_saved();active(1)
+    # Actual toolbar actions must save the highlighted ID and advance, even
+    # though the displayed cursor changes before its acknowledgement returns.
+    editor().locator('#accept').click();active(2);wait_saved()
+    assert (1,'accepted',1) in states() and (2,None,1) in states()
+    assert preview_pixel(50,35)[3]==0 and color(50,35)[1]>color(50,35)[0]
+    editor().locator('#reject').click();active(3);wait_saved()
+    assert (2,'rejected',1) in states()
+    editor().locator('#reject').click();active(None);wait_saved()
+    assert (3,'rejected',1) in states()
+    assert not editor().locator('#outline-preview').evaluate(
+        'c=>c.getContext("2d").getImageData(0,0,c.width,c.height).data.some((v,i)=>i%4===3 && v!==0)')
+    expect(editor().locator('#accept')).to_be_disabled()
+    expect(editor().locator('#reject')).to_be_disabled()
+    expect(editor().locator('#selected')).to_contain_text('No unreviewed fibers remain')
+    editor().locator('#next').click();wait_saved();active(None)
+    assert original_pixels()==source_before
+    guide_after=export_rows('guided-complete.csv')
+    fields=('fiber_id','length_um','mean_diameter_um','diameter_sd_um','calibration_um_per_px')
+    assert [[r[k] for k in fields] for r in guide_before]==[[r[k] for k in fields] for r in guide_after]
+    assert [int(r['fiber_id']) for r in guide_after if r['included_in_measurement_statistics']=='True']==[1]
+    for expected in (3,2,1):
+        editor().locator('#undo').click();wait_saved();active(expected)
+    assert states()==before_states
+    editor().locator('#image').evaluate('''c=>{
+        c.focus();for(const key of ['a','r','a'])
+            c.dispatchEvent(new KeyboardEvent('keydown',{key,bubbles:true}));
+    }''')
+    active(None);wait_saved()
+    assert states()==[(1,'accepted',1),(2,'rejected',1),(3,'accepted',1)], 'Rapid guided decisions changed the wrong IDs.'
+    for expected in (3,2,1):
+        editor().locator('#undo').click();wait_saved();active(expected)
+    assert states()==before_states
+    # A deliberately rejected save must restore its target, not silently skip it.
+    editor().locator('#image').evaluate("()=>{args.context='deliberately-stale-guided-test';}")
+    editor().locator('#reject').click();wait_saved();active(1)
+    assert states()==before_states
+    # Switching away from review clears the transient blue layer; returning
+    # chooses the first unreviewed object without changing source measurements.
+    editor().locator('#outline').click();active(None)
+    editor().locator('#toggle').click();wait_saved();active(1)
+    page.set_viewport_size(dict(width=1500,height=1100))
+    editor().locator('#zoom').fill('100')
+    editor().locator('.results-grid').screenshot(path=str(output/'active-review.png'))
+    free_review();active(None)
+    page.get_by_text('Review by object ID and save confirmations',exact=True).click()
+    print('Guided mask highlight, toolbar/ID synchronization, auto-advance, completion, zoom/redraw, mode cleanup and failed-save target restore passed',flush=True)
     wait_color(50,35,True)
     wait_color(50,75,True)
     assert_ids([1,2])  # Excluded border object 3 never gets an ID.
@@ -363,15 +509,19 @@ def interactions(browser, url, root, output, network_latency_ms=0):
     # Hiding is display-only; automatically excluded border object 3 is retained.
     before_states=states()
     editor().locator('#viewMode').select_option('hide_auto')
+    wait_saved()
     assert color(50,115)==[200,200,200]
     assert color(50,35)[0]>color(50,35)[1]  # Manual rejection remains visible.
     editor().locator('#viewMode').select_option('review')
+    wait_saved()
     assert color(50,75)==[200,200,200]
     assert color(50,115)[0]>color(50,115)[1]
     editor().get_by_role('button',name='Next unreviewed (N)',exact=True).click()
+    wait_saved()
     assert 'Fiber 3:' in editor().locator('#selected').inner_text()
     assert states()==before_states
     editor().locator('#viewMode').select_option('all')
+    wait_saved()
     assert original_pixels()==original_before
     print('Left/right click, shortcuts, redo, rapid queued saves, rollback and display filters passed',flush=True)
     # A new image starts with no human overrides. Research exclusion is soft;
@@ -450,34 +600,15 @@ def interactions(browser, url, root, output, network_latency_ms=0):
     page.get_by_role('button',name='Analyze image',exact=True).click()
     wait_saved()
     assert_ids([1855,2033])
+    free_review()
     editor().locator('#zoom').fill('400')
     click(50,65)
     wait_color(50,65,True)
     expect(editor().locator('#accept')).to_have_text('Accept fiber 1855 (A)')
     expect(editor().locator('#reject')).to_have_text('Reject fiber 1855 (R)')
     high_original=original_pixels()
-    def export_rows(name):
-        with page.expect_download() as downloaded:
-            page.get_by_role('button',name='Download per-fiber CSV',exact=True).click()
-        downloaded.value.save_as(output/name)
-        with (output/name).open(encoding='utf-8',newline='') as file:
-            return list(csv.DictReader(file))
     high_before=export_rows('toolbar-before.csv')
     assert len(high_before)==2033
-    def displayed_pixel(x,y):
-        # Inspect Chromium's composited output, not just the canvas buffer or
-        # state metadata. Keep the source pixel inside the visible viewport.
-        editor().locator('#viewport').scroll_into_view_if_needed()
-        c=editor().locator('#image')
-        c.evaluate('''(c,p)=>{
-            const v=c.parentElement,s=c.getBoundingClientRect().width/c.width;
-            v.scrollLeft=Math.max(0,p[0]*s-v.clientWidth/2);
-            v.scrollTop=Math.max(0,p[1]*s-v.clientHeight/2);
-        }''',[x,y])
-        box=c.bounding_box()
-        sx,sy=box['x']+x*box['width']/1280,box['y']+y*box['height']/800
-        screenshot=page.screenshot(clip=dict(x=int(sx)-2,y=int(sy)-2,width=5,height=5))
-        return Image.open(BytesIO(screenshot)).convert('RGB').getpixel((2,2))
     for action,green in (('reject',False),('accept',True)):
         editor().locator('#image').evaluate('''()=>{
             const original=paintObjects;let skip=true;
@@ -519,6 +650,18 @@ def interactions(browser, url, root, output, network_latency_ms=0):
     page.get_by_role('button',name='Analyze image',exact=True).click()
     wait_saved()
     assert_ids([1,2])
+    for expected in (1,2,3,4):
+        if expected!=1:
+            editor().locator('#next').click();wait_saved()
+        active(expected)
+    assert preview_pixel(310,205)[2]>120 and preview_pixel(310,205)[3]>230
+    assert preview_pixel(350,170)[3]==0, 'The active highlight filled a bounding box rather than the crossing mask.'
+    assert preview_pixel(50,35)[3]==0, 'A non-target fiber received the active highlight.'
+    editor().locator('#zoom').fill('400');active(4)
+    pixel=displayed_pixel(310,205)
+    assert pixel[2]>pixel[0]+60 and pixel[2]>pixel[1]+60, ('Zoomed crossing target is not visibly blue',pixel)
+    editor().locator('#zoom').fill('100')
+    free_review()
     editor().locator('#diagnostics').check()
     expect(editor().locator('#mode-label')).to_contain_text('Review mode')
     click(310,205)
@@ -557,14 +700,17 @@ def interactions(browser, url, root, output, network_latency_ms=0):
         editor().locator('#showIds').set_checked(show_ids)
         assert color(310,205)[1]>color(310,205)[0], 'A normal redraw erased approval.'
     editor().locator('#viewMode').select_option('hide_auto')
+    wait_saved()
     assert color(310,205)[1]>color(310,205)[0]
     editor().locator('#viewMode').select_option('all')
+    wait_saved()
     editor().get_by_role('button',name='Outline missed / merged fiber',exact=True).click()
     expect(editor().locator('#mode-label')).to_contain_text('Outline mode')
     click(700,300)
     assert states()==before_states, 'Outline mode must not approve a background click.'
     editor().locator('#clear').click()
     editor().locator('#toggle').click()
+    wait_saved()
     editor().locator('#zoom').fill('100')
     editor().locator('#clickMode').select_option('toggle')
     expect(editor().locator('#mode-label')).to_contain_text('left-click toggles approval')
@@ -587,6 +733,7 @@ def interactions(browser, url, root, output, network_latency_ms=0):
     page.get_by_text('Bright fibers on dark background',exact=True).click()
     page.get_by_role('button',name='Analyze image',exact=True).click()
     wait_saved()
+    free_review()
     wait_color(310,205,True);wait_color(50,115,True)
     assert_ids([1,2])
     click(310,205);wait_saved()
@@ -632,6 +779,11 @@ def interactions(browser, url, root, output, network_latency_ms=0):
                   unmeasurable_approval_highlight=True,exact_mask_highlight=True,
                   approval_survives_redraw_zoom_reopen=True,multiple_approvals_persist=True,
                   click_diagnostics=True,interaction_mode_visible=True,
+                  active_mask_highlight=True,guided_auto_advance=True,review_completion_clears_highlight=True,
+                  active_target_id_sync=True,active_highlight_is_temporary=True,
+                  failed_save_restores_active_target=True,
+                  rapid_guided_decisions_keep_exact_ids=True,active_mask_not_bounding_box=True,
+                  active_highlight_absent_from_exports=True,
                   browser_errors=errors)
     (output/'report.json').write_text(json.dumps(report,indent=2),encoding='utf-8')
     print('Browser interaction checks passed',flush=True)

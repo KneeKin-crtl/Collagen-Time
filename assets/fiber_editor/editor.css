@@ -37,9 +37,10 @@ canvas { display: block; cursor: crosshair; touch-action: pan-x pan-y; }
 #original-note { margin: 6px 10px; font-size: 12px; color: var(--lab-muted); }
 #review-progress { font-size: 12px; color: var(--lab-text); padding: 10px 0 6px; line-height: 1.5; overflow-wrap: anywhere; }
 .legend { display: flex; flex-wrap: wrap; align-items: center; gap: 7px 14px; font-size: 12px; color: var(--lab-muted); padding-bottom: 5px; }
-.green, .red { display: inline-flex; align-items: center; gap: 5px; font-weight: 550; }
+.green, .red, .blue { display: inline-flex; align-items: center; gap: 5px; font-weight: 550; }
 .green { color: var(--lab-accent); }.red { color: var(--lab-reject); }
-.green::before, .red::before { content: ''; display: inline-block; width: 7px; height: 7px; border-radius: 50%; background: currentColor; }
+.blue { color: #00008B; }
+.green::before, .red::before, .blue::before { content: ''; display: inline-block; width: 7px; height: 7px; border-radius: 50%; background: currentColor; }
 @media(max-width:760px) {
   .results-grid { grid-template-columns: minmax(0,1fr); }
   .tools { gap: 8px; }.tool-group { flex-basis: 260px; }

@@ -364,6 +364,57 @@ def test_retrain_without_enough_reviews_explains_requirements(uploads):
     assert 'two training images' in app.warning[0].value
 
 
+def test_object_id_review_cursor_advances_without_changing_geometry(uploads):
+    image=np.zeros((100,160),np.uint16)
+    image[20:29,20:120]=45000;image[40:49,20:120]=45000
+    uploads['image']=('guided.tiff',image_bytes(image))
+    app=submit(AppTest.from_file(APP).run(timeout=30))
+    fields=['fiber_id','length_um','mean_diameter_um','diameter_sd_um','endpoints']
+    before=app.dataframe[0].value[fields].copy()
+    assert widget(app,'selectbox','Object ID').value==1
+    widget(app,'selectbox','Object ID').set_value(2).run(timeout=30)
+    args=json.loads(app.main.get('component_instance')[0].proto.json_args)
+    assert args['selection_request']['fiber_id']==2
+    assert app.dataframe[0].value.manual_classification.isna().all()
+    widget(app,'button','Mark rejected').click().run(timeout=30)
+    assert not app.exception
+    assert widget(app,'selectbox','Object ID').value==1
+    args=json.loads(app.main.get('component_instance')[0].proto.json_args)
+    assert args['selection_request']['fiber_id']==1
+    widget(app,'button','Mark accepted').click().run(timeout=30)
+    assert not app.exception
+    assert widget(app,'selectbox','Object ID').value is None
+    assert widget(app,'button','Mark accepted').disabled
+    args=json.loads(app.main.get('component_instance')[0].proto.json_args)
+    assert args['selection_request']['fiber_id'] is None
+    assert app.dataframe[0].value.manual_classification.tolist()==['accepted','rejected']
+    assert app.dataframe[0].value[fields].equals(before)
+
+
+def test_canvas_selection_event_only_updates_cursor_not_saved_reviews(uploads):
+    image=np.zeros((100,160),np.uint16)
+    image[20:29,20:120]=45000;image[40:49,20:120]=45000
+    uploads['image']=('cursor.tiff',image_bytes(image))
+    app=submit(AppTest.from_file(APP).run(timeout=30))
+    review=app.session_state['_active_review']
+    revision=review.store.revision
+    before=app.dataframe[0].value.copy()
+    event=dict(action='select',token='cursor-only',context=review.context,
+               fiber_id=2,guided=True,view_mode='all')
+    with patch('collagen.review_ui.fiber_editor',return_value=event):
+        app.run(timeout=30)
+    assert not app.exception
+    assert widget(app,'selectbox','Object ID').value==2
+    assert review.store.revision==revision
+    assert app.dataframe[0].value.equals(before)
+    with patch('collagen.review_ui.fiber_editor',return_value={**event,'token':'bad-cursor','fiber_id':999}):
+        app.run(timeout=30)
+    assert not app.exception
+    assert widget(app,'selectbox','Object ID').value==2
+    assert review.store.revision==revision
+    assert 'active visible object' in app.warning[0].value
+
+
 def test_physical_filters_change_eligibility_without_geometry_or_image_encoding(uploads):
     from collagen.pipeline import analyze_pixels
     from collagen.editor import editor_assets

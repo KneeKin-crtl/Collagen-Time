@@ -33,6 +33,7 @@
  <label class="select-control">Show <select id="viewMode" aria-label="Detection visibility"><option value="all">All detections</option><option value="hide_auto">Hide automatic exclusions</option><option value="review">Only requiring manual review</option></select></label>
  <label><input id="shortcuts" type="checkbox" checked> Keyboard shortcuts</label>
  <label><input id="showIds" type="checkbox" checked> Show accepted fiber IDs</label>
+ <label><input id="guided" type="checkbox" checked> Guided review (blue target, auto-advance)</label>
  <label>Zoom <input aria-label="Zoom" id="zoom" type="range" min="50" max="800" value="100" step="25"> <span id="zoomLabel">100%</span></label>
  <label><input id="diagnostics" type="checkbox"> Click diagnostics</label>
 </div>
@@ -51,7 +52,7 @@
  </section>
 </div>
 <div id="review-progress" aria-live="polite"></div>
-<div class="legend"><span class="green">Green: approved mask (#00FF00 tint)</span><span class="red">Red: rejected or unapproved mask</span><span>Green approval does not guarantee usable measurements. Measurement counts and ID labels include measurable fibers only.</span></div>
+<div class="legend"><span class="blue">Dark blue: active review target (temporary)</span><span class="green">Green: approved mask (#00FF00 tint)</span><span class="red">Red: rejected or unapproved mask</span><span>Green approval does not guarantee usable measurements. Measurement counts and ID labels include measurable fibers only.</span></div>
 <details id="diagnostic-panel" hidden><summary>Click diagnostics (local, last 40 records)</summary><pre id="click-log"></pre></details>
 <script src="editor.js"></script>
 </body>
