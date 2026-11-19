@@ -46,6 +46,9 @@ def editor_diagnostics(page):
                     pending:c?.dataset.pendingCount,context:c?.dataset.reviewContext,
                     ready:c?.dataset.editorReady,source:c?.dataset.sourceImage,
                     active:c?.dataset.activeFiberId,guided:c?.dataset.guidedReview,
+                    center:c?.dataset.centerPoint,
+                    scroll:c?Array.from([c.closest('.viewport').scrollLeft,c.closest('.viewport').scrollTop]):null,
+                    clickTrace:document.getElementById('click-log')?.textContent?.slice(-2200),
                     selected:document.getElementById('selected')?.textContent,
                     status:document.getElementById('status')?.textContent,
                     progress:document.getElementById('review-progress')?.textContent,
@@ -214,8 +217,11 @@ def interactions(browser, url, root, output, network_latency_ms=0):
                     wait_saved()
                     return
             time.sleep(.1)
-        raise AssertionError(('Color did not update',x,y,green,color(x,y)))
+        raise AssertionError(('Color did not update',x,y,green,color(x,y),editor_diagnostics(page)))
     def click(x,y,button='left'):
+        # A saved bitmap can precede the host's final layout/iframe update.
+        # Wait for that update before locating the actual hit-tested element.
+        wait_idle();wait_saved()
         canvas = editor().locator('#image')
         canvas.scroll_into_view_if_needed()
         canvas.evaluate('''(c,p)=>{
@@ -223,9 +229,17 @@ def interactions(browser, url, root, output, network_latency_ms=0):
             v.scrollLeft=Math.max(0,c.offsetLeft+p[0]*s-v.clientWidth/2);
             v.scrollTop=Math.max(0,c.offsetTop+p[1]*s-v.clientHeight/2);
         }''',[x,y])
-        box = canvas.bounding_box()
-        width,height = canvas.evaluate('(c)=>[c.width,c.height]')
-        page.mouse.click(box['x']+x*box['width']/width,box['y']+y*box['height']/height,button=button)
+        canvas.evaluate('''async c=>{
+            await new Promise(resolve=>{
+                let previous='',stable=0;
+                const tick=()=>{const r=c.getBoundingClientRect(),position=[r.x,r.y,r.width,r.height].join(',');
+                    stable=position===previous?stable+1:0;previous=position;
+                    if(stable>=4)resolve();else requestAnimationFrame(tick);
+                };requestAnimationFrame(tick);
+            });
+        }''')
+        scale=canvas.evaluate('c=>c.getBoundingClientRect().width/c.width')
+        canvas.click(position=dict(x=x*scale,y=y*scale),button=button)
     def states():
         with closing(sqlite3.connect(root/'data'/'feedback.sqlite3')) as con:
             return con.execute('SELECT fiber_id,manual_classification,active FROM objects ORDER BY fiber_id').fetchall()
