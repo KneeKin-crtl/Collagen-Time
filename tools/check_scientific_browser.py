@@ -4,6 +4,7 @@ import csv
 import hashlib
 import json
 import os
+import re
 import sqlite3
 import time
 import traceback
@@ -14,7 +15,18 @@ import check_feedback_browser as checks
 
 
 def interactions(browser,url,root,output,network_latency_ms=0):
-    page=checks.new_analysis_page(browser,network_latency_ms);errors=[]
+    def new_page():
+        page=checks.new_analysis_page(browser,network_latency_ms)
+        # HTTP latency does not delay WebSocket form submissions. Exercise the
+        # save/download ordering explicitly rather than relying on CI speed.
+        page.add_init_script('''(()=>{
+            const send=WebSocket.prototype.send;
+            WebSocket.prototype.send=function(data){setTimeout(()=>{
+                if(this.readyState===WebSocket.OPEN)send.call(this,data);
+            },200);};
+        })();''')
+        return page
+    page=new_page();errors=[]
     page.on('pageerror',lambda error:errors.append(str(error)))
     source=root/'synthetic.png';sha=hashlib.sha256(source.read_bytes()).hexdigest()
     def frame():return page.frame_locator('iframe[title*="fiber_editor"]')
@@ -24,8 +36,11 @@ def interactions(browser,url,root,output,network_latency_ms=0):
         deadline=time.monotonic()+30
         while time.monotonic()<deadline:
             with suppress(Exception):
-                state=frame().locator('#image').evaluate('c=>({ready:c.dataset.editorReady,pending:c.dataset.pendingCount,source:JSON.parse(c.dataset.sourceImage||"{}")})',timeout=500)
-                if state['ready']=='true' and state['pending']=='0' and state['source'].get('sha256')==sha:return
+                state=frame().locator('#image').evaluate('c=>({ready:c.dataset.editorReady,pending:c.dataset.pendingCount,revision:args?.review_revision,source:JSON.parse(c.dataset.sourceImage||"{}")})',timeout=500)
+                with closing(sqlite3.connect(root/'data/feedback.sqlite3')) as con:
+                    revision=con.execute("SELECT value FROM meta WHERE key='revision'").fetchone()[0]
+                if (state['ready']=='true' and state['pending']=='0' and state['source'].get('sha256')==sha
+                        and state['revision']==revision):return
             time.sleep(.1)
         raise AssertionError(checks.editor_diagnostics(page))
     def open_image():
@@ -51,10 +66,30 @@ def interactions(browser,url,root,output,network_latency_ms=0):
         expect(control).to_have_attribute('aria-expanded','true')
         page.get_by_role('option',name=option,exact=True).click();idle()
     def reference(name):
+        captions=page.get_by_text(re.compile(r'^Saved reference revision:'))
+        expect(captions).to_have_count(1,timeout=30000)
+        caption=captions.inner_text()
+        expected_revision=int(re.search(r'Saved reference revision: (\d+)',caption)[1])
         with page.expect_download() as result:
             page.get_by_role('button',name='Download versioned reference JSON',exact=True).click()
         result.value.save_as(output/name)
-        return json.loads((output/name).read_text())
+        document=json.loads((output/name).read_text())
+        assert document['annotation_revision']==expected_revision, ('Stale reference download',expected_revision,document['annotation_revision'])
+        return document
+    def submit_reference(button, object_count):
+        caption=page.get_by_text(re.compile(r'^Saved reference revision:'))
+        previous=caption.inner_text()
+        previous_revision=int(re.search(r'Saved reference revision: (\d+)',previous)[1])
+        button.click()
+        # The image editor can already be idle while a native Streamlit form
+        # submission has not started. Wait for its actual saved revision.
+        updated=page.get_by_text(re.compile(
+            rf'^Saved reference revision: (?!{previous_revision}\b)\d+ · {object_count} reference objects\.')).last
+        expect(updated).to_be_visible(timeout=30000)
+        # Streamlit can briefly retain both stale and current panel trees.
+        expect(caption).to_have_count(1,timeout=30000)
+        expect(caption).not_to_have_text(previous,timeout=30000)
+        idle();saved()
     def csv_rows(name):
         with page.expect_download() as result:
             page.get_by_role('button',name='Download per-fiber CSV',exact=True).click()
@@ -80,13 +115,13 @@ def interactions(browser,url,root,output,network_latency_ms=0):
     page.get_by_role('textbox',name='Acquisition group (leave blank if unknown)',exact=True).fill('synthetic-session-browser')
     page.get_by_role('textbox',name='Magnification metadata',exact=True).fill('40x (synthetic metadata only)')
     choose('Independent reference category','Valid measurable fiber')
-    page.get_by_role('button',name='Save selected detection category (not boundary truth)',exact=True).click();saved();idle()
+    submit_reference(page.get_by_role('button',name='Save selected detection category (not boundary truth)',exact=True),1)
     copied=reference('classification-only.json')
     assert len(copied['objects'])==1 and copied['objects'][0]['boundary_source']=='prediction_reference'
     prediction=copied['objects'][0]['original_prediction']
     assert prediction['fiber_id']==1 and prediction['original_row']['review_status']=='accepted'
     choose('Independent reference category','Non-fiber object')
-    page.get_by_role('button',name='Save selected detection category (not boundary truth)',exact=True).click();saved();idle()
+    submit_reference(page.get_by_role('button',name='Save selected detection category (not boundary truth)',exact=True),1)
     relabeled=reference('reclassified.json')
     assert relabeled['objects'][0]['category']=='non_fiber'
     assert relabeled['objects'][0]['original_prediction']==prediction
@@ -96,7 +131,7 @@ def interactions(browser,url,root,output,network_latency_ms=0):
     page.get_by_role('spinbutton',name='Independent manual reference length (µm; optional)',exact=True).fill('30')
     page.get_by_role('spinbutton',name='Independent manual reference mean diameter (µm; optional)',exact=True).fill('5')
     page.get_by_role('textbox',name='Independent measurement source / ROI identifier',exact=True).fill('Analytical synthetic dimensions')
-    page.get_by_role('button',name='Configure independent reference outline',exact=True).click();saved();idle()
+    submit_reference(page.get_by_role('button',name='Configure independent reference outline',exact=True),1)
     expect(frame().locator('#reference')).to_be_enabled()
     frame().locator('#reference').click()
     expect(frame().locator('#mode-label')).to_contain_text('Independent reference mode')
@@ -109,7 +144,7 @@ def interactions(browser,url,root,output,network_latency_ms=0):
     page.keyboard.press('a');page.keyboard.press('r')
     assert events()==before_events, 'Reference mode changed an operational decision.'
     click(700,360)
-    frame().get_by_role('button',name='Save reference boundary',exact=True).click();saved();idle()
+    submit_reference(frame().get_by_role('button',name='Save reference boundary',exact=True),2)
     expect(frame().locator('#mode-label')).to_contain_text('Review mode')
     drawn=reference('independent-reference.json')
     assert len(drawn['objects'])==2
@@ -129,7 +164,7 @@ def interactions(browser,url,root,output,network_latency_ms=0):
     page.get_by_role('button',name='Validate and import reference version',exact=True).click();idle()
     page.get_by_text('Reference pixels, shape or dtype do not match this original image.',exact=True).wait_for()
     assert reference('after-rejected-import.json')['version_id']==drawn['version_id']
-    page.close();page=checks.new_analysis_page(browser,network_latency_ms)
+    page.close();page=new_page()
     page.on('pageerror',lambda error:errors.append(str(error)))
     open_image();page.get_by_text(panel,exact=True).click();idle()
     restored=reference('reopened.json')
@@ -139,7 +174,8 @@ def interactions(browser,url,root,output,network_latency_ms=0):
         reference_categories_saved=True,prediction_masks_not_ground_truth=True,original_prediction_preserved=True,
         independent_missed_reference_drawn=True,reference_mode_shows_original=True,zoom_coordinates_correct=True,
         manual_measurements_not_derived=True,operational_predictions_unchanged=True,reference_versions_persist=True,
-        wrong_source_import_rejected=True,network_latency_ms=network_latency_ms,browser_errors=errors),indent=2))
+        wrong_source_import_rejected=True,network_latency_ms=network_latency_ms,
+        websocket_send_latency_ms=200,saved_revision_matches_download=True,browser_errors=errors),indent=2))
     print('Scientific reference browser passed: four-way labels, immutable predictions, independent outline, original-pixel tracing, no operational changes, import identity and reopening',flush=True)
 
 

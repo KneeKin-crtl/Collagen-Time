@@ -231,3 +231,10 @@ measurements, group leakage, versioning, exports, frozen inference and plots.
 Windows workflows also run the reference browser test against the packaged app;
 optional report dependencies have their own Linux/Windows CI jobs. Passing these
 software checks is not evidence of real-image accuracy.
+
+The independent-reference browser check also delays outgoing WebSocket form
+submissions by 200 ms. An idle image editor does not establish that a native
+reference form has saved. The check waits for a new saved reference revision,
+current viewer/store revisions and removal of stale panel copies before downloading;
+the downloaded JSON must match the displayed revision. This prevents exporting a
+previous snapshot while the form request is still in flight.
