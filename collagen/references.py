@@ -4,6 +4,7 @@ An accepted/rejected click is not independent boundary ground truth. Copied
 prediction masks are explicitly marked and cannot establish segmentation accuracy.
 """
 import base64
+from contextlib import closing
 from copy import deepcopy
 from datetime import datetime, timezone
 import json
@@ -225,14 +226,14 @@ class ReferenceStore:
         self.directory=Path(directory) if directory is not None else feedback_directory()
         self.directory.mkdir(parents=True,exist_ok=True)
         self.path=self.directory/'feedback.sqlite3'
-        with sqlite3.connect(self.path) as con:
+        with closing(sqlite3.connect(self.path,timeout=30)) as con, con:
             con.execute('''CREATE TABLE IF NOT EXISTS reference_versions (
                 sequence INTEGER PRIMARY KEY, image_key TEXT NOT NULL, version_id TEXT NOT NULL UNIQUE,
                 parent_version_id TEXT, created_at TEXT NOT NULL, document_json TEXT NOT NULL)''')
             con.execute('CREATE INDEX IF NOT EXISTS reference_images ON reference_versions(image_key,sequence)')
 
     def load(self, image_key):
-        with sqlite3.connect(self.path) as con:
+        with closing(sqlite3.connect(self.path,timeout=30)) as con, con:
             row=con.execute('SELECT document_json FROM reference_versions WHERE image_key=? ORDER BY sequence DESC LIMIT 1',
                             (image_key,)).fetchone()
         return json.loads(row[0]) if row else None
@@ -240,7 +241,7 @@ class ReferenceStore:
     def save(self, document, image=None):
         validate_reference(document,image)
         doc=deepcopy(document)
-        with sqlite3.connect(self.path,timeout=30) as con:
+        with closing(sqlite3.connect(self.path,timeout=30)) as con, con:
             con.execute('BEGIN IMMEDIATE')
             row=con.execute('SELECT version_id FROM reference_versions WHERE image_key=? ORDER BY sequence DESC LIMIT 1',
                             (doc['image_key'],)).fetchone()
@@ -259,10 +260,10 @@ class ReferenceStore:
         return doc
 
     def versions(self, image_key):
-        with sqlite3.connect(self.path) as con:
+        with closing(sqlite3.connect(self.path,timeout=30)) as con, con:
             return [json.loads(r[0]) for r in con.execute('SELECT document_json FROM reference_versions WHERE image_key=? ORDER BY sequence',(image_key,))]
 
     def version_headers(self, image_key):
-        with sqlite3.connect(self.path) as con:
+        with closing(sqlite3.connect(self.path,timeout=30)) as con, con:
             return [dict(version_id=r[0],parent_version_id=r[1],created_at=r[2]) for r in con.execute(
                 'SELECT version_id,parent_version_id,created_at FROM reference_versions WHERE image_key=? ORDER BY sequence',(image_key,))]

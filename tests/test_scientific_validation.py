@@ -154,6 +154,23 @@ def test_new_false_positives_compare_only_the_same_reviewed_region():
         compare_methods(old,evaluate_instances(after,other),before.labels,after.labels)
 
 
+def test_reference_connections_close_after_reads_and_failed_writes(tmp_path,monkeypatch):
+    import sqlite3
+    actual=sqlite3.connect;opened=[]
+    def connect(*args,**kwargs):
+        con=actual(*args,**kwargs);opened.append(con);return con
+    monkeypatch.setattr('collagen.references.sqlite3.connect',connect)
+    analysis,doc=fixture();store=ReferenceStore(tmp_path)
+    saved=store.save(doc,analysis.original)
+    assert store.load(doc['image_key'])==saved
+    assert len(store.versions(doc['image_key']))==1
+    assert len(store.version_headers(doc['image_key']))==1
+    with pytest.raises(ValueError,match='changed'):store.save(doc,analysis.original)
+    assert len(opened)==6
+    for con in opened:
+        with pytest.raises(sqlite3.ProgrammingError,match='closed'):con.execute('SELECT 1')
+
+
 @pytest.mark.parametrize('field,value',[('category','accepted'),('reviewer',''),('length_um',-1),('length_um',float('inf'))])
 def test_invalid_reference_objects_are_rejected(field,value):
     a,ref=fixture();ref['objects'][0][field]=value
