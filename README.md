@@ -73,9 +73,15 @@ Left-click to accept, right-click to reject; choose **Left click toggles** for t
 earlier behavior. A/R accept/reject the selected object; N advances through
 unreviewed objects. Undo/Redo and Ctrl+Z/Ctrl+Y preserve history. Enable/disable
 keyboard shortcuts in the editor. Background clicks never select nearby objects.
+**Guided review** is on by default: the active unreviewed mask is dark blue
+(`#00008B`) with a contrast halo, and Accept/Reject advances to the next visible
+unreviewed ID. The Object ID dropdown and toolbar share this target. The steady
+blue highlight is temporary, follows zoom/scroll, and is never exported. It clears
+when the queue is complete or Outline mode is entered. Turn Guided review off for
+the earlier free-form inspection workflow. See [active fiber review](docs/active-fiber-review.md).
 The selected ID and decision appear above the images, and the Accept/Reject
 buttons name their target ID. A temporary dashed box marks that object's bounds
-without changing exported images. Clicking background clears the toolbar target.
+in free-form mode without changing exported images. Clicking background clears the toolbar target.
 See [approval highlights and click diagnostics](docs/approval-highlights.md) for
 the saved-state policy, measurement distinction and optional event trace.
 

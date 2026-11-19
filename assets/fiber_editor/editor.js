@@ -7,7 +7,9 @@ const originalCanvas=$('original-image'),originalCtx=originalCanvas.getContext('
 const originalViewport=$('original-viewport'),preview=$('outline-preview'),previewCtx=preview.getContext('2d');
 const zoom=$('zoom');
 const APPROVED_RGB=[0,255,0],REJECTED_RGB=[255,0,0],OVERLAY_OPACITY=.6;
+const ACTIVE_REVIEW_RGB=[0,0,139]; // DarkBlue; transient preview layer only.
 let args=null,state=null,assets=null,committedKey=null,objects=new Map(),origin='*',generation=0,ready=false,fit=1,down=null,lastHeight=0;
+let activeMask=null;
 // Streamlit may replace an iframe during reruns. Keep the queue and decoded
 // layers in this browser tab so replacement cannot lose queued review events.
 const shared=window.parent.__collagenReview || (window.parent.__collagenReview={states:new Map(),assets:new Map()});
@@ -32,8 +34,9 @@ function controls(){
   $('resolve').hidden=!(visible(selected) && selected.manual==='accepted' && !selected.accepted && selected.can_outline);
   $('resolve').disabled=disabled || barrier() || state?.mode!=='review';
   for(const id of ['undo','redo'])$(id).disabled=disabled || barrier();
-  $('next').disabled=disabled;
-  for(const id of ['clickMode','viewMode','shortcuts','showIds','zoom','diagnostics'])$(id).disabled=!ready;
+  $('next').disabled=disabled || barrier();
+  for(const id of ['clickMode','viewMode','shortcuts','showIds','zoom','diagnostics','guided'])$(id).disabled=!ready;
+  $('guided').disabled=disabled || barrier();
   $('clickMode').disabled=disabled;
   $('save').disabled=disabled || pending().length>0 || state?.mode!=='outline' || state.points.length<3;
   canvas.dataset.pendingCount=String(pending().length);
@@ -46,6 +49,28 @@ function controls(){
 }
 function visible(obj){return obj && (state.viewMode==='all' ||
   (state.viewMode==='hide_auto' ? obj.accepted || obj.manual!==null : obj.needs_review));}
+function nextReviewId(after=null,direction=1,exclude=null){
+  const ids=Array.from(objects.values()).filter(o=>visible(o) && o.manual===null && o.fiber_id!==exclude)
+    .map(o=>o.fiber_id).sort((a,b)=>a-b);
+  if(!ids.length)return null;
+  if(after===null)return direction>0?ids[0]:ids[ids.length-1];
+  return direction>0 ? ids.find(id=>id>after)??ids[0] : ids.slice().reverse().find(id=>id<after)??ids[ids.length-1];
+}
+function ensureReviewTarget(){
+  if(!state.guided || state.mode!=='review' || args.review_enabled===false)return false;
+  if(state.reviewInitialized && (state.selected===null || visible(objects.get(state.selected))))return false;
+  state.selected=nextReviewId();state.reviewInitialized=true;return true;
+}
+function applySelectionRequest(data){
+  const request=data.selection_request;
+  if(!request?.token || request.token===state.selectionToken)return false;
+  state.selectionToken=request.token;
+  state.selected=visible(objects.get(request.fiber_id))?request.fiber_id:null;
+  state.reviewInitialized=true;return true;
+}
+function syncSelection(){
+  enqueue('select',{fiber_id:state.selected,guided:state.guided,view_mode:state.viewMode});
+}
 function projected(){
   const result=new Map((args.objects||[]).map(o=>[o.fiber_id,Object.assign({},o)]));
   for(const event of pending()){
@@ -83,7 +108,10 @@ function updateMetadata(){
   const blocked=selected?.manual==='accepted' && !selected.accepted;
   const decision=blocked?'approved (green); NOT counted':selected?.category.replaceAll('_',' ');
   const reason=blocked?selected.accept_block_message||selected.reason:selected?.reason;
-  $('selected').textContent=selected?`Fiber ${selected.fiber_id}: ${decision}${reason?' · '+reason:''}`:'Select a colored object. A: accept · R: reject · N: next unreviewed · Ctrl+Z / Ctrl+Y: undo / redo.';
+  const guidance=state.guided && state.mode==='review' && args.review_enabled!==false ?
+    nextReviewId()===null?'No unreviewed fibers remain in the current view.':'Press Next unreviewed to resume guided review.' :
+    'Select a colored object. A: accept · R: reject · N: next unreviewed · Ctrl+Z / Ctrl+Y: undo / redo.';
+  $('selected').textContent=selected?`Fiber ${selected.fiber_id}: ${decision}${reason?' · '+reason:''}`:guidance;
   points();controls();height();
 }
 function intersects(a,b){return a[0]<b[2] && b[0]<a[2] && a[1]<b[3] && b[1]<a[3];}
@@ -129,13 +157,47 @@ function reconcile(previous){
        // Confirmation must repaint even if the optimistic decision already
        // matches: a missed provisional draw must never become the saved view.
        old.saved_event!==obj.saved_event)changed.add(id);}
-  paintObjects(changed);updateMetadata();
+  const oldSelected=previous.get(state.selected),selected=objects.get(state.selected);
+  if(state.guided && state.mode==='review' && oldSelected?.manual===null && selected?.manual!==null)
+    state.selected=nextReviewId(state.selected);
+  const moved=applySelectionRequest(args) || ensureReviewTarget();
+  paintObjects(changed);updateMetadata();if(moved)focusSelected();
+}
+function reviewMask(id){
+  if(activeMask?.assets===assets && activeMask.id===id)return activeMask;
+  const bounds=assets.bounds.get(id);if(!bounds)return null;
+  const [x,y,right,bottom]=bounds,width=right-x,height=bottom-y;
+  const surface=window.parent.document.createElement('canvas');surface.width=width;surface.height=height;
+  const context=surface.getContext('2d'),image=context.createImageData(width,height);
+  for(let row=0;row<height;row++)for(let col=0;col<width;col++){
+    if(assets.labels[(y+row)*assets.width+x+col]!==id)continue;
+    const p=(row*width+col)*4;
+    image.data[p]=ACTIVE_REVIEW_RGB[0];image.data[p+1]=ACTIVE_REVIEW_RGB[1];
+    image.data[p+2]=ACTIVE_REVIEW_RGB[2];image.data[p+3]=235;
+  }
+  context.putImageData(image,0,0);
+  activeMask={assets,id,surface,x,y};return activeMask;
 }
 function points(){
   if(!assets)return;
   previewCtx.clearRect(0,0,preview.width,preview.height);
   const scale=fit*Number(zoom.value)/100;
-  if(state.mode==='review' && visible(objects.get(state.selected))){
+  const active=ready && args.review_enabled!==false && state.mode==='review' && visible(objects.get(state.selected));
+  canvas.dataset.guidedReview=String(state.guided);
+  canvas.dataset.activeFiberId=active && state.guided?String(state.selected):'';
+  preview.dataset.activeFiberId=canvas.dataset.activeFiberId;
+  if(active && state.guided){
+    const mask=reviewMask(state.selected);
+    if(mask){
+      previewCtx.save();
+      // A small white halo gives thin/dark masks contrast at any display scale.
+      // The dark blue pixels themselves follow only this segmentation ID.
+      previewCtx.shadowColor='#fff';previewCtx.shadowBlur=3/scale;
+      previewCtx.drawImage(mask.surface,mask.x,mask.y);
+      previewCtx.shadowBlur=0;previewCtx.drawImage(mask.surface,mask.x,mask.y);
+      previewCtx.restore();
+    }
+  }else if(active){
     const b=assets.bounds.get(state.selected),pad=3/scale;
     if(b){
       previewCtx.save();previewCtx.lineWidth=3/scale;previewCtx.strokeStyle='#000';
@@ -174,17 +236,23 @@ function pump(){
   post('streamlit:setComponentValue',{value:state.inflight,dataType:'json'});
 }
 function enqueue(action,extra={}){
-  if(!ready || args.review_enabled===false || barrier())return;
-  if(pending().length>=128){status('Wait for queued corrections to finish saving before adding more.');return;}
+  if(!ready || args.review_enabled===false || barrier())return false;
+  if(pending().length>=128){status('Wait for queued corrections to finish saving before adding more.');return false;}
   const previous=objects;
   const token=window.crypto.randomUUID?window.crypto.randomUUID():Date.now()+'-'+Math.random();
   state.queue.push(Object.assign({action,token},extra));
-  reconcile(previous);status('Saving corrections… Keep this tab open until all corrections are saved.');pump();
+  reconcile(previous);status(action==='select'?'Updating review target…':'Saving corrections… Keep this tab open until all corrections are saved.');pump();
+  return true;
 }
 function classify(id,action,extra={}){
   if(!editable() || !visible(objects.get(id)))return;
   const before=objects.get(id).approved;
-  state.selected=id;enqueue(action,Object.assign({fiber_id:id},extra));
+  state.selected=id;
+  const next=state.guided && state.mode==='review'?nextReviewId(id,1,id):id;
+  if(!enqueue(action,Object.assign({fiber_id:id,next_fiber_id:next,guided:state.guided,view_mode:state.viewMode},extra)))return;
+  if(state.guided && state.mode==='review'){
+    state.selected=next;state.reviewInitialized=true;focusSelected();updateMetadata();
+  }
   diagnostic('decision',{fiber_id:id,action,approved_before:before,approved_after:objects.get(id).approved,
     included_in_measurements:objects.get(id).accepted && objects.get(id).measurable});
 }
@@ -196,14 +264,21 @@ function focusSelected(){
   syncScroll(viewport,originalViewport);
 }
 function selectNext(direction=1){
+  if(!ready || args.review_enabled===false || barrier())return;
+  if(state.guided){
+    state.selected=nextReviewId(state.selected,direction);state.reviewInitialized=true;
+    focusSelected();updateMetadata();syncSelection();canvas.focus({preventScroll:true});return;
+  }
   const candidates=Array.from(objects.values()).filter(o=>visible(o) && o.manual===null).map(o=>o.fiber_id).sort((a,b)=>a-b);
   const ids=candidates.length?candidates:Array.from(objects.values()).filter(visible).map(o=>o.fiber_id).sort((a,b)=>a-b);
   if(!ids.length){status('No objects in the current view.');return;}
   const index=ids.indexOf(state.selected);
   state.selected=ids[index<0?(direction>0?0:ids.length-1):(index+direction+ids.length)%ids.length];
-  focusSelected();updateMetadata();canvas.focus({preventScroll:true});
+  focusSelected();updateMetadata();syncSelection();canvas.focus({preventScroll:true});
 }
-function setMode(mode){if(!editable())return;state.mode=mode;state.resolving=false;points();controls();status(mode==='outline'?'Trace one separated boundary, then Save outline. Backspace removes a vertex.':'Left accept / right reject, or choose Toggle mode.');}
+function setMode(mode){if(!editable())return;state.mode=mode;state.resolving=false;
+  if(mode==='review' && state.guided){state.selected=nextReviewId();state.reviewInitialized=true;focusSelected();}
+  updateMetadata();if(mode==='review')syncSelection();status(mode==='outline'?'Trace one separated boundary, then Save outline. Backspace removes a vertex.':'Left accept / right reject, or choose Toggle mode.');}
 $('toggle').onclick=()=>setMode('review');$('outline').onclick=()=>setMode('outline');
 $('clear').onclick=()=>{state.points=[];points();controls();};
 $('save').onclick=()=>enqueue('outline',{points:state.points.map(p=>p.slice())});
@@ -220,7 +295,13 @@ $('diagnostics').onchange=e=>{
   state.diagnostics=e.target.checked;controls();
   $('click-log').textContent=JSON.stringify(state.trace||[],null,2);height();
 };
-$('viewMode').onchange=e=>{state.viewMode=e.target.value;paintRect([0,0,canvas.width,canvas.height]);updateMetadata();};
+$('guided').onchange=e=>{
+  state.guided=e.target.checked;state.reviewInitialized=false;
+  if(state.guided){state.selected=nextReviewId();state.reviewInitialized=true;focusSelected();}
+  updateMetadata();syncSelection();
+};
+$('viewMode').onchange=e=>{state.viewMode=e.target.value;
+  const moved=ensureReviewTarget();paintRect([0,0,canvas.width,canvas.height]);updateMetadata();if(moved)focusSelected();syncSelection();};
 $('showIds').onchange=e=>{state.showIds=e.target.checked;paintRect([0,0,canvas.width,canvas.height]);updateMetadata();};
 zoom.oninput=()=>{state.zoom=zoom.value;resize();};
 canvas.oncontextmenu=e=>{if(state?.mode==='review')e.preventDefault();};
@@ -241,6 +322,7 @@ canvas.onpointerup=e=>{
     fiber_id:id,approved_before:obj?.approved??false});
   if(!visible(obj)){
     state.selected=null;updateMetadata();
+    syncSelection();
     status('No visible detected object at that pixel. Selection cleared; background never selects a neighbor.');return;
   }
   const action=button===2?'reject':state.clickMode==='toggle' && obj.approved?'reject':'accept';
@@ -295,6 +377,7 @@ window.addEventListener('message',async event=>{
   const client=data.client_key||'baseline';
   if(!shared.states.has(client))shared.states.set(client,{queue:[],inflight:null,selected:null,layouts:new Map(),mode:'review',points:[],clickMode:'accept_reject',viewMode:'all',shortcuts:true,showIds:true,zoom:'100',scroll:[0,0],policy:data.policy_key});
   state=shared.states.get(client);
+  if(state.guided===undefined)state.guided=true;
   let notice=data.message||'';
   if(state.inflight && data.ack_token===state.inflight.token){
     diagnostic('save-confirmed',{action:state.inflight.action,success:data.event_ok,fiber_id:state.inflight.fiber_id});
@@ -305,7 +388,12 @@ window.addEventListener('message',async event=>{
         if(Number.isInteger(data.ack_fiber_id))state.selected=data.ack_fiber_id;
       }
     }
-    if(!data.event_ok){state.queue=[];notice='Save failed; provisional changes were restored to the confirmed state. '+notice;}
+    if(!data.event_ok){state.queue=[];
+      if(state.guided && Number.isInteger(state.inflight.fiber_id))state.selected=state.inflight.fiber_id;
+      notice='Save failed; provisional changes were restored to the confirmed state. '+notice;}
+    if(data.event_ok && state.guided && ['undo','redo'].includes(state.inflight.action)){
+      state.reviewInitialized=false;state.syncCursorAfterRender=true;
+    }
     state.inflight=null;
   }
   if(state.policy!==data.policy_key){
@@ -313,7 +401,7 @@ window.addEventListener('message',async event=>{
     state.queue=[];state.inflight=null;state.policy=data.policy_key;
   }
   args=data;
-  if(committedKey!==data.asset_key){ready=false;controls();}
+  if(committedKey!==data.asset_key){ready=false;points();controls();}
   const cacheKey=client+':'+data.asset_key;
   if(!shared.assets.has(cacheKey) && !data.base_image){
     ready=false;controls();status('Restoring cached image layers…');
@@ -343,23 +431,27 @@ window.addEventListener('message',async event=>{
     const changed=assets!==next,previous=objects;
     assets=next;committedKey=data.asset_key;
     if(changed){
+      activeMask=null;
       for(const c of [canvas,originalCanvas,preview]){c.width=assets.width;c.height=assets.height;}
       originalCtx.drawImage(assets.original,0,0);state.layouts=new Map();
     }
     for(const item of data.fiber_id_labels||[])state.layouts.set(item.fiber_id,item);
     $('clickMode').value=state.clickMode;$('viewMode').value=state.viewMode;$('shortcuts').checked=state.shortcuts;
     $('showIds').checked=state.showIds;zoom.value=state.zoom;
+    $('guided').checked=state.guided;
     $('diagnostics').checked=!!state.diagnostics;$('click-log').textContent=JSON.stringify(state.trace||[],null,2);
     $('original-note').textContent=data.original_note||'';$('original-note').hidden=!data.original_note;
     ready=true;
-    if(changed){objects=projected();paintRect([0,0,canvas.width,canvas.height]);updateMetadata();resize();
+    if(changed){objects=projected();const moved=applySelectionRequest(data) || ensureReviewTarget();paintRect([0,0,canvas.width,canvas.height]);updateMetadata();resize();
       viewport.scrollLeft=state.scroll[0];viewport.scrollTop=state.scroll[1];syncScroll(viewport,originalViewport);
+      if(moved)focusSelected();
     }else{
       reconcile(previous);
       for(const rect of oldRects)paintRect(rect);
       paintObjects(spriteChanges);
     }
     status(pending().length?'Saving corrections… Keep this tab open until all corrections are saved.':notice||'All corrections saved. Left accept / right reject. A/R/N and Undo/Redo work when the image has keyboard focus.');
+    if(state.syncCursorAfterRender && !pending().length){state.syncCursorAfterRender=false;syncSelection();}
     pump();
   }catch(error){if(id!==generation)return;ready=false;controls();status(error.message+' Review is disabled; refresh before editing.');}
 });

@@ -16,6 +16,22 @@ from .quality import approval_block_details
 from .ui import summary_cards
 
 
+def request_review_selection(selected_key, request_key):
+    """Mirror an explicit object-ID choice into the temporary canvas cursor."""
+    st.session_state[request_key] = dict(token=uuid.uuid4().hex,
+                                       fiber_id=st.session_state.get(selected_key))
+
+
+def next_review_object(table, selected=None, view_mode='all'):
+    """Choose an unreviewed visible cursor target without changing decisions."""
+    ids = sorted(o['fiber_id'] for o in editor_objects(table)
+                 if o['fiber_id'] != selected and o['manual'] is None
+                 and (view_mode == 'all' or
+                      (o['accepted'] or o['manual'] is not None if view_mode == 'hide_auto' else o['needs_review'])))
+    return next((fiber_id for fiber_id in ids if selected is not None and fiber_id > selected),
+                ids[0] if ids else None)
+
+
 def comparison_editor(result, review=None, image_name='', **kwargs):
     """Keep both views tied to the exact source used by this analysis."""
     assets = getattr(review,'editor_assets',None)
@@ -79,6 +95,12 @@ def reviewed_results(baseline, image_name, source_sha, filters=None):
         st.session_state.pop('feedback_backup', None)
         st.session_state['review_context'] = review.context
     result = review.result
+    selected_key, selection_key = 'review-object-' + key, 'review-selection-' + key
+    pending_selection_key = 'review-next-selection-' + key
+    if pending_selection_key in st.session_state:
+        st.session_state[selected_key] = st.session_state.pop(pending_selection_key)
+    if selected_key not in st.session_state:
+        st.session_state[selected_key] = next_review_object(result.table)
     summary_cards(result.summary)
     role_locked = store.image_role(review.image_key)
     with st.container(key='dataset-review'):
@@ -101,6 +123,7 @@ def reviewed_results(baseline, image_name, source_sha, filters=None):
     event = comparison_editor(result, review=review, context=review.context,
                          client_key=st.session_state[client_key], policy_key=review.context.rsplit(':',1)[-1] if filters else '',
                          geometry_key=str(review._mask_signature),
+                         selection_request=st.session_state.get(selection_key),
                          ack_token=st.session_state.get(ack_key),
                          ack_fiber_id=st.session_state.get('review-object-' + key),
                          event_ok=notice.get('level') == 'success', message=notice.get('text', ''),
@@ -113,21 +136,38 @@ def reviewed_results(baseline, image_name, source_sha, filters=None):
             st.session_state[ack_key] = event.get('token')
         try:
             asset_key = fingerprint(review.analysis_key, review._mask_signature)
+            if event.get('action') != 'request_assets' and event.get('asset_key') == asset_key:
+                known = event.get('known_sprites', [])
+                valid = {sprite['sprite_key'] for sprite in review.sprite_cache.values()}
+                st.session_state['editor_assets_ack-' + asset_key] = {
+                    'sprites':[key for key in known if isinstance(key,str) and key in valid] if isinstance(known,list) else []}
             if event.get('action') == 'request_assets':
                 if event.get('context') != review.context or not isinstance(event.get('token'),str):
                     raise ValueError('Refresh image layers on the current review.')
                 st.session_state.pop('editor_assets_ack-' + asset_key, None)
                 selected = None
+            elif event.get('action') == 'select':
+                if event.get('context') != review.context:
+                    raise ValueError('Select a fiber in the current image review.')
+                selected = event.get('fiber_id')
+                if selected is not None and (isinstance(selected, bool) or not isinstance(selected, int)
+                        or selected not in {o['fiber_id'] for o in editor_objects(result.table)}):
+                    raise ValueError('Select an active visible object.')
+                st.session_state[selected_key] = selected
             else:
-                if event.get('asset_key') == asset_key:
-                    known = event.get('known_sprites', [])
-                    valid = {sprite['sprite_key'] for sprite in review.sprite_cache.values()}
-                    st.session_state['editor_assets_ack-' + asset_key] = {
-                        'sprites':[key for key in known if isinstance(key,str) and key in valid] if isinstance(known,list) else []}
                 selected = review.handle_event(event, role)
             if event.get('action') in ('toggle', 'accept', 'reject', 'outline'):
-                st.session_state['review-object-' + key] = int(selected)
+                target = event.get('next_fiber_id') if 'next_fiber_id' in event else int(selected)
+                if target is not None and (isinstance(target, bool) or not isinstance(target, int)
+                        or target not in set(result.table.fiber_id)):
+                    target = int(selected)
+                st.session_state[selected_key] = target
+            if event.get('action') in ('select', 'accept', 'reject'):
+                st.session_state['review-guided-' + key] = event.get('guided') is not False
+                if event.get('view_mode') in ('all', 'hide_auto', 'review'):
+                    st.session_state['review-view-' + key] = event['view_mode']
             message = ('Image layers restored.' if event.get('action') == 'request_assets' else
+                       'Review target updated; no correction saved.' if event.get('action') == 'select' else
                        'Correction saved.' if selected else 'Nothing to undo/redo.')
             # Preview the quality gate without another image/geometry build.
             if selected and event.get('action') == 'accept':
@@ -151,22 +191,32 @@ def reviewed_results(baseline, image_name, source_sha, filters=None):
     with st.expander('Review by object ID and save confirmations', expanded=False):
         st.caption(f'Object classifier: {model_name}. Left-click to accept; right-click to reject. A/R accept/reject the selected object, N advances, Ctrl+Z undoes and Ctrl+Y redoes. Choose Toggle mode for the earlier click behavior. Background never selects a neighbor.')
         ids = result.table.fiber_id.tolist()
-        selected_key = 'review-object-' + key
-        if st.session_state.get(selected_key) not in ids:
-            st.session_state.pop(selected_key, None)
-        selected = st.selectbox('Object ID', ids, key=selected_key, disabled=not ids)
+        if st.session_state.get(selected_key) is not None and st.session_state.get(selected_key) not in ids:
+            st.session_state[selected_key] = None
+        selected = st.selectbox('Object ID', ids, index=None, key=selected_key, disabled=not ids,
+                                on_change=request_review_selection, args=(selected_key, selection_key))
         st.caption('Use these buttons to confirm an already correct decision as a reviewed training/evaluation example. A click toggle also saves a reviewed example. Each object is one detected mask; connected fibers may share a mask until individually outlined.')
+        st.caption('The selected Object ID shares the main viewer target. Guided review highlights that mask in dark blue and advances to the next unreviewed object after acceptance or rejection. Turn Guided review off for free-form inspection or outline repair. Blue is temporary and never exported.')
         columns = st.columns(4)
-        accept = columns[0].button('Mark accepted', disabled=not ids)
-        reject = columns[1].button('Mark rejected', disabled=not ids)
+        accept = columns[0].button('Mark accepted', disabled=selected is None)
+        reject = columns[1].button('Mark rejected', disabled=selected is None)
         undo = columns[2].button('Undo last correction')
         redo = columns[3].button('Redo last correction')
         if accept or reject or undo or redo:
             try:
                 if undo or redo:
                     changed = getattr(store,'undo' if undo else 'redo')(key, review.revision)
+                    if changed and st.session_state.get('review-guided-' + key, True):
+                        review.refresh()
+                        target = next_review_object(review.result.table, view_mode=st.session_state.get('review-view-' + key, 'all'))
+                        st.session_state[pending_selection_key] = target
+                        st.session_state[selection_key] = dict(token=uuid.uuid4().hex, fiber_id=target)
                 else:
                     changed = review.correct(int(selected), 'accepted' if accept else 'rejected', role)
+                    target = (next_review_object(result.table, int(selected), st.session_state.get('review-view-' + key, 'all'))
+                              if st.session_state.get('review-guided-' + key, True) else int(selected))
+                    st.session_state[pending_selection_key] = target
+                    st.session_state[selection_key] = dict(token=uuid.uuid4().hex, fiber_id=target)
                 message='Correction saved.' if changed else 'Nothing to undo.'
                 if accept and changed:
                     row=result.table.loc[result.table.fiber_id.eq(selected)].iloc[0]
