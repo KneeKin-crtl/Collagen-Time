@@ -3,8 +3,10 @@ from contextlib import closing,suppress
 import csv
 import hashlib
 import json
+import os
 import sqlite3
 import time
+import traceback
 
 from playwright.sync_api import expect
 
@@ -112,7 +114,8 @@ def interactions(browser,url,root,output,network_latency_ms=0):
     drawn=reference('independent-reference.json')
     assert len(drawn['objects'])==2
     obj=drawn['objects'][1]
-    assert obj['boundary_source']=='independent_manual' and obj['bbox_yxyx']==[350,700,361,761]
+    assert obj['boundary_source']=='independent_manual' and obj['bbox_yxyx']==[350,700,361,761], (
+        'Independent boundary coordinates differ',obj.get('bbox_yxyx'),obj.get('human_polygon_xy'))
     assert obj['length_um']==30 and obj['mean_diameter_um']==5
     assert drawn['specimen_id']=='synthetic-specimen-browser' and drawn['calibration_um_per_px']==.5
     assert events()==before_events and csv_rows('after-outline.csv')==before
@@ -141,5 +144,11 @@ def interactions(browser,url,root,output,network_latency_ms=0):
 
 
 if __name__=='__main__':
-    checks.interactions=interactions
-    checks.main()
+    try:
+        checks.interactions=interactions
+        checks.main()
+    except Exception:
+        if os.environ.get('GITHUB_ACTIONS')=='true':
+            detail=traceback.format_exc()[-5000:].replace('%','%25').replace('\r','%0D').replace('\n','%0A')
+            print('::error title=Reference browser failure::'+detail,flush=True)
+        raise
